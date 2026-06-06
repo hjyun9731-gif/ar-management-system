@@ -1014,7 +1014,12 @@ export const billingRouter = router({
         status: input.status,
         billingStartMonth: input.billingStartMonth,
       });
-      return await candidates;
+      if (!input.status) {
+        return candidates.filter((candidate: any) =>
+          candidate.status !== "기존부과중" && candidate.status !== "반영완료"
+        );
+      }
+      return candidates;
     }),
 
   // 부과 대상자 상세 조회
@@ -1282,35 +1287,12 @@ export const billingRouter = router({
     .mutation(async ({ input }) => {
       const preview = await buildPreview(input.rows, input.step);
       const selectedByUser = preview.filter((item) => input.selectedIndexes.includes(item.rowIndex));
-      // 안전장치: 회원관리시스템에서 전체 후보를 읽더라도 실제 DB 반영은 이번 달/다음 달 부과대상만 한다.
-      // 예: 2018-11-24 같은 과거 기존 회원은 기존 부과 중으로 보고 다음 달 부과 대상에 쌓지 않는다.
-      const selected = selectedByUser.filter((item) => {
-        if (item.type !== "REGISTER") return true;
-        if (item.status === "확인필요") return false;
-        return isCurrentOrNextBillingTarget(item.billingStartMonth);
-      });
+      // 전체 후보는 모두 반영 처리한다.
+      // 단, 부과시작일이 이번달/다음달인 사람만 예정자 목록에 남기고,
+      // 과거 기존회원은 기존부과중 상태로 저장하여 예정자 목록에서는 숨긴다.
+      const selected = selectedByUser;
 
       const results: { rowIndex: number; status: string; message: string }[] = [];
-
-      const skippedByMonthForWarning = typeof selectedByUser !== "undefined"
-        ? selectedByUser.filter((item) => !selected.some((s) => s.rowIndex === item.rowIndex))
-        : [];
-
-      for (const item of skippedByMonthForWarning) {
-        const sourceId = (item as any).sourceSystemId || ((item.raw as any)?.sourceSystemId) || "UNKNOWN";
-        const msg = item.status === "확인필요"
-          ? (item.reason || "확인필요 대상은 자동 반영하지 않았습니다.")
-          : "이번 달/다음 달 반영 대상이 아니므로 기존 부과 중으로 판단되어 제외되었습니다.";
-        try {
-          await createSyncLog({
-            eventType: "IMPORT",
-            sourceId,
-            status: "WARNING",
-            message: msg,
-          });
-        } catch (_) {}
-        results.push({ rowIndex: item.rowIndex, status: "warning", message: msg });
-      }
 
       for (const item of selected) {
         try {
@@ -1332,8 +1314,11 @@ export const billingRouter = router({
               results.push({ rowIndex: item.rowIndex, status: "warning", message: "중복 - 확인필요 처리" });
             } else {
               const billingType = item.billingType || "확인필요";
-              const status = item.status || "확인필요";
               const billingStartMonth = item.billingStartMonth || "";
+              const scheduleTarget = isCurrentOrNextBillingTarget(item.billingStartMonth);
+              const status = item.status === "확인필요"
+                ? "확인필요"
+                : (scheduleTarget ? (item.status || "대기") : "기존부과중");
               const normalizedMobile = normalizeMobileForDb(row.mobile);
               const result: any = await createBillingCandidate({
                 sourceSystemId: item.sourceSystemId,
@@ -1364,9 +1349,11 @@ export const billingRouter = router({
                 status: status === "확인필요" ? "WARNING" : "SUCCESS",
                 message: status === "확인필요"
                   ? (item.reason || "필수 날짜 누락")
-                  : `${billingType} 대상자 등록 (부과시작일: ${billingStartMonth}, 기준: ${item.billingSource || "-"})`,
+                  : (status === "기존부과중"
+                    ? `${billingType} 기존 부과대상 반영 완료 (부과시작일: ${billingStartMonth || "-"}, 기준: ${item.billingSource || "-"})`
+                    : `${billingType} 예정자 등록 (부과시작일: ${billingStartMonth}, 기준: ${item.billingSource || "-"})`),
               });
-              results.push({ rowIndex: item.rowIndex, status: "success", message: `${billingType} 등록 완료` });
+              results.push({ rowIndex: item.rowIndex, status: "success", message: status === "기존부과중" ? `${billingType} 기존 부과대상 반영 완료` : `${billingType} 예정자 등록 완료` });
             }
           } else {
             // CLOSURE
