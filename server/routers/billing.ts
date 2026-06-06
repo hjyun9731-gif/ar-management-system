@@ -61,6 +61,12 @@ function nextBillingMonth(base?: string | Date): string | null {
   return `${targetYear}-${String(targetMonthIndex + 1).padStart(2, "0")}-${String(targetDay).padStart(2, "0")}`;
 }
 
+// Drizzle MySQL date column은 Date 객체가 아니라 YYYY-MM-DD 문자열로 넣어야 안전하다.
+// Date 객체가 들어가면 MySQL에 "Thu Nov..." 형태로 전달되어 insert가 실패할 수 있다.
+function toDbDate(value: any): string | undefined {
+  return normalizeDateString(value) || undefined;
+}
+
 // 레거시 연동용: 단일 부과항목 계산
 // 실제 불러오기/미리보기는 buildRegisterPreviewItems에서 업무 기준에 따라 1개 부과항목만 생성한다.
 function calculateBillingStartMonth(
@@ -778,14 +784,14 @@ export const billingRouter = router({
           mobile: input.mobile,
           address: input.address,
           phone: input.phone,
-          certificateDate: input.certificateDate ? new Date(input.certificateDate) : undefined,
+          certificateDate: input.certificateDate ? toDbDate(input.certificateDate) : undefined,
           certificateNo: input.certificateNo,
           licenseNo: input.licenseNo,
           vehicleType: input.vehicleType,
           fuelType: input.fuelType,
           businessNo: input.businessNo,
           company: input.company,
-          joinDate: input.joinDate ? new Date(input.joinDate) : undefined,
+          joinDate: input.joinDate ? toDbDate(input.joinDate) : undefined,
           memo: input.memo,
           memberType: input.memberType,
           billingType,
@@ -1165,8 +1171,10 @@ export const billingRouter = router({
                 vehicleType: row.vehicleType,
                 businessNo: row.businessNo,
                 company: row.company,
-                joinDate: row.joinDate ? new Date(row.joinDate) : undefined,
-                certificateDate: row.certificateDate ? new Date(row.certificateDate) : undefined,
+                // 협회비는 가입일자/인가일자만 저장하고, 관리비는 자격증명발급일자만 저장한다.
+                // Date 객체 금지: MySQL DATE 컬럼에는 YYYY-MM-DD 문자열만 넣는다.
+                joinDate: billingType === "협회비" ? (toDbDate(row.joinDate) || toDbDate(row.approvalDate)) : undefined,
+                certificateDate: billingType === "관리비" ? toDbDate(row.certificateDate) : undefined,
                 memo: [row.memo, item.billingSource ? `부과기준: ${item.billingSource}` : undefined, item.reason].filter(Boolean).join(" / ") || undefined,
                 memberType: row.memberType,
                 billingType,
