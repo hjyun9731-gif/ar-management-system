@@ -437,6 +437,7 @@ function normalizeJoinStatus(value: any): string {
 }
 
 function getRawJoinStatus(member: any): string {
+  if (member.__fetchedAsJoined === true) return "가입";
   return normalizeJoinStatus(firstValue(
     member.membership_status,
     member.member_status,
@@ -900,9 +901,9 @@ export const billingRouter = router({
       let closuresCount = 0;
 
       if (input?.includeMembers !== false) {
-        const members = await fetchAllPagedFromMemberSystem(baseUrl, "/api/members?status=all", auth);
+        const members = await fetchAllPagedFromMemberSystem(baseUrl, "/api/members?status=%EA%B0%80%EC%9E%85", auth);
         membersCount = members.length;
-        rows.push(...members.map(mapMemberSystemMemberToImportRow));
+        rows.push(...members.map((member) => mapMemberSystemMemberToImportRow({ ...member, __fetchedAsJoined: true })));
       }
 
       if (input?.includeClosures !== false) {
