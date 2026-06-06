@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, like } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { InsertUser, users, billingCandidates, closureEvents, syncLogs, billingRecords, InsertBillingCandidate, InsertClosureEvent, InsertSyncLog, InsertBillingRecord } from "../drizzle/schema";
 import { ENV } from './_core/env';
@@ -111,7 +111,7 @@ export async function getBillingCandidates(filters?: {
     query = query.where(eq(billingCandidates.status, filters.status));
   }
   if (filters?.billingStartMonth) {
-    query = query.where(eq(billingCandidates.billingStartMonth, filters.billingStartMonth));
+    query = query.where(like(billingCandidates.billingStartMonth, filters.billingStartMonth + "%"));
   }
 
   return await query;
