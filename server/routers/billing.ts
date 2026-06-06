@@ -80,6 +80,19 @@ function getCurrentMonthKey(): string {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 
+function getNextMonthKey(): string {
+  const now = new Date();
+  const year = now.getMonth() === 11 ? now.getFullYear() + 1 : now.getFullYear();
+  const month = now.getMonth() === 11 ? 1 : now.getMonth() + 2;
+  return year + "-" + String(month).padStart(2, "0");
+}
+
+function isCurrentOrNextBillingTarget(value?: string | null): boolean {
+  const monthKey = getMonthKey(value);
+  if (!monthKey) return false;
+  return monthKey === getCurrentMonthKey() || monthKey === getNextMonthKey();
+}
+
 function determinePreviewStatus(billingStartDate?: string): "대기" | "부과예정" {
   const monthKey = getMonthKey(billingStartDate);
   if (!monthKey) return "대기";
@@ -410,7 +423,7 @@ function buildRegisterPreviewItems(
     // 가입일자 파싱 가능 -> 가입일자 기준, 가입일자 O/공란 등 오래된 가입자 -> 인가일자 기준, 둘 다 없으면 부과시작일 없이 협회비 대상.
     billingSource: basis === "인가일자" ? "인가일자" : "가입일자",
     reason: basis === "가입일자"
-      ? "일반 가입자(배번호 제외) 가입일자 기준 협회비"
+      ? (isCurrentOrNextBillingTarget(billingStartDate) ? "일반 가입자(배번호 제외) 가입일자 기준 협회비" : "기존 부과 중으로 판단: 가입일자 기준 협회비")
       : basis === "인가일자"
         ? "일반 가입자(배번호 제외) 가입일자 없음 / 인가일자 기준 협회비"
         : "일반 가입자(배번호 제외) 가입일자·인가일자 없음 / 협회비 부과대상",
@@ -1268,7 +1281,14 @@ export const billingRouter = router({
     )
     .mutation(async ({ input }) => {
       const preview = await buildPreview(input.rows, input.step);
-      const selected = preview.filter((item) => input.selectedIndexes.includes(item.rowIndex));
+      const selectedByUser = preview.filter((item) => input.selectedIndexes.includes(item.rowIndex));
+      // 안전장치: 회원관리시스템에서 전체 후보를 읽더라도 실제 DB 반영은 이번 달/다음 달 부과대상만 한다.
+      // 예: 2018-11-24 같은 과거 기존 회원은 기존 부과 중으로 보고 다음 달 부과 대상에 쌓지 않는다.
+      const selected = selectedByUser.filter((item) => {
+        if (item.type !== "REGISTER") return true;
+        if (item.status === "확인필요") return false;
+        return isCurrentOrNextBillingTarget(item.billingStartMonth);
+      });
 
       const results: { rowIndex: number; status: string; message: string }[] = [];
 
