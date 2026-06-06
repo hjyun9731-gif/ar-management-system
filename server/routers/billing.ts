@@ -130,6 +130,13 @@ function hasValue(value?: string | Date): boolean {
   return String(value).trim().length > 0;
 }
 
+// 회원관리시스템의 오래된 가입자는 가입일자 칸에 o/O/ㅇ/○ 같은 표시만 있고
+// 실제 날짜가 없는 경우가 있다. 이 값은 날짜가 아니라 "가입 표시"로만 본다.
+function isJoinMarker(value: any): boolean {
+  const text = String(value ?? "").trim().toLowerCase();
+  return ["o", "0", "ㅇ", "○", "●", "가입"].includes(text);
+}
+
 function findDuplicateForBillingType(list: any[], row: { rrn?: string; vehicleNo: string; name: string }, billingType: string): number | undefined {
   const sameBillingType = (c: any) => !c.billingType || c.billingType === billingType;
   if (row.rrn) {
@@ -262,32 +269,24 @@ function buildRegisterPreviewItems(row: z.infer<typeof registerRowSchema>, list:
   const isBaeVehicle = String(row.vehicleNo || "").includes("배");
 
   // 1단계 확정 규칙:
-  // 일반 가입자(배번호 제외)만 본다.
-  // 가입 상태가 가입인 일반 차량은 미리보기 목록에 포함한다.
-  // 가입일자가 정상 파싱되면 협회비 대상, 가입 상태는 가입인데 가입일자를 못 읽으면 날짜누락으로 분리한다.
+  // 일반 가입자(배번호 제외)만 협회비 부과대상으로 본다.
+  // 가입일자가 정상 파싱되면 가입일자 다음 달 같은 날짜를 부과시작일로 쓴다.
+  // 오래된 가입자처럼 가입일자 칸이 o/○ 등 표시뿐이면 인가일자를 대신 본다.
+  // 인가일자도 없으면 부과시작일은 비워두되, 확인필요가 아니라 협회비 부과대상으로 유지한다.
   // 배번호/택배/관리비 대상은 이번 1단계에서 완전히 제외한다.
   if (isBaeVehicle) return [];
 
   const joinStatus = String(row.joinStatus || "").trim();
   const isJoined = joinStatus === "가입" || joinStatus.includes("가입");
   const isNonJoined = joinStatus.includes("미가입") || joinStatus.toLowerCase() === "x";
-  const billingStartDate = nextBillingMonth(row.joinDate);
 
   if (isNonJoined) return [];
+  if (!isJoined && !row.joinDate && !row.approvalDate) return [];
 
-  if (!billingStartDate) {
-    if (!isJoined) return [];
-    return [makeRegisterPreviewItem({
-      row,
-      rowIndex: nextIndex(),
-      list,
-      billingType: "확인필요",
-      billingStartMonth: "",
-      status: "확인필요",
-      billingSource: "확인필요",
-      reason: "가입 상태는 가입이나 가입일자 파싱 실패",
-    })];
-  }
+  const joinBasedStartDate = nextBillingMonth(row.joinDate);
+  const approvalBasedStartDate = nextBillingMonth(row.approvalDate);
+  const billingStartDate = joinBasedStartDate || approvalBasedStartDate || "";
+  const basis = joinBasedStartDate ? "가입일자" : approvalBasedStartDate ? "인가일자" : "가입표시";
 
   return [makeRegisterPreviewItem({
     row,
@@ -297,7 +296,11 @@ function buildRegisterPreviewItems(row: z.infer<typeof registerRowSchema>, list:
     billingStartMonth: billingStartDate,
     status: "대기",
     billingSource: "가입일자",
-    reason: "일반 가입자(배번호 제외) 가입일자 기준 협회비",
+    reason: basis === "가입일자"
+      ? "일반 가입자(배번호 제외) 가입일자 기준 협회비"
+      : basis === "인가일자"
+        ? "일반 가입자(배번호 제외) 가입일자 없음 / 인가일자 기준 협회비"
+        : "일반 가입자(배번호 제외) 가입일자·인가일자 없음 / 협회비 부과대상",
   })];
 }
 
@@ -477,21 +480,42 @@ function mapMemberSystemMemberToImportRow(member: any): ImportRow {
   // API 필드명이 배포본마다 다를 수 있으므로 가능한 가입일자 후보를 폭넓게 읽는다.
   const rawJoinDate = firstValue(
     member.membership_date,
+    member.membershipDate,
+    member.membership_join_date,
+    member.membershipJoinDate,
+    member.association_membership_date,
+    member.associationMembershipDate,
+    member.association_join_date,
+    member.associationJoinDate,
+    member.association_date,
+    member.associationDate,
+    member.member_join_date,
+    member.memberJoinDate,
+    member.member_joined_date,
+    member.memberJoinedDate,
     member.joinDate,
     member.join_date,
-    member.association_join_date,
-    member.member_join_date,
-    member.join_at,
-    member.joined_at,
-    member.registration_date,
     member.joined_date,
-    member.member_joined_date,
-    member.association_date,
+    member.joinedDate,
+    member.join_at,
+    member.joinAt,
+    member.joined_at,
+    member.joinedAt,
     member.join_dt,
+    member.registration_date,
+    member.registrationDate,
+    member.enrollment_date,
+    member.enrollmentDate,
+    member.signup_date,
+    member.signupDate,
     member.가입일자,
     member.가입일,
     member.가입날짜,
-    member.가입일시
+    member.가입일시,
+    member.협회가입일자,
+    member.협회가입일,
+    member.회원가입일자,
+    member.회원가입일
   );
   const rawJoinStatus = getRawJoinStatus(member);
 
@@ -506,6 +530,7 @@ function mapMemberSystemMemberToImportRow(member: any): ImportRow {
   );
 
   const joinDate = isExplicitNonJoined(member) ? undefined : toDateString(rawJoinDate);
+  const effectiveJoinStatus = rawJoinStatus || (isJoinMarker(rawJoinDate) ? "가입" : undefined);
 
   return {
     type: "REGISTER",
@@ -518,7 +543,7 @@ function mapMemberSystemMemberToImportRow(member: any): ImportRow {
     mobile: firstValue(member.mobile, member.phone, member.핸드폰, member.휴대폰) || undefined,
     memberType: mapMemberType(member.category, vehicleNo),
     joinDate,
-    joinStatus: rawJoinStatus || undefined,
+    joinStatus: effectiveJoinStatus || undefined,
     approvalDate: toDateString(rawApprovalDate),
     certificateDate: toDateString(rawCertificateDate),
     vehicleType: firstValue(member.vehicle_type, member.vehicleType, member.차종) || undefined,
@@ -541,6 +566,59 @@ function mapMemberSystemClosureToImportRow(closure: any): ImportRow {
     processDate: toDateString(closure.closure_date || closure.processDate || closure.approval_date || closure.created_at) || "",
     receiptDate: toDateString(closure.receipt_date || closure.receiptDate),
   };
+}
+
+function memberKey(member: any): string {
+  const vehicleNo = String(firstValue(member.vehicle_number, member.vehicleNo, member.car_number, member.차량번호) || "").trim();
+  const id = String(firstValue(member.id, member.sourceSystemId, member.member_id, member.memberId, "") || "").trim();
+  return id ? `id:${id}` : `vehicle:${vehicleNo}`;
+}
+
+function looksLikePersonalCategory(member: any): boolean {
+  const category = String(firstValue(member.category, member.member_category, member.memberType, member.구분, member.회원구분) || "").trim();
+  if (!category) return true;
+  if (category.includes("택배")) return false;
+  return category.includes("개인") || category.includes("일반") || category === "회원" || category === "개인회원";
+}
+
+function isStep1JoinedGeneralMember(member: any): boolean {
+  const vehicleNo = String(firstValue(member.vehicle_number, member.vehicleNo, member.car_number, member.차량번호) || "").trim();
+  if (!vehicleNo || vehicleNo.includes("배")) return false;
+  if (!looksLikePersonalCategory(member)) return false;
+
+  const rawStatus = getRawJoinStatus(member);
+  const normalizedStatus = rawStatus.toLowerCase();
+  if (rawStatus.includes("미가입") || normalizedStatus === "x" || normalizedStatus === "false" || normalizedStatus === "0") return false;
+
+  // 회원관리시스템 배포본마다 가입 여부 필드명이 달라서 다음 조건 중 하나면 가입자로 본다.
+  // 1) membership_status/가입여부가 가입
+  // 2) 가입일자 계열 필드가 있음
+  // 단, 명시적 미가입은 위에서 제외한다.
+  const mapped = mapMemberSystemMemberToImportRow(member) as any;
+  const rawJoinDate = firstValue(
+    member.membership_date, member.membershipDate,
+    member.membership_join_date, member.membershipJoinDate,
+    member.association_membership_date, member.associationMembershipDate,
+    member.association_join_date, member.associationJoinDate,
+    member.association_date, member.associationDate,
+    member.member_join_date, member.memberJoinDate,
+    member.joinDate, member.join_date, member.joined_date, member.joinedDate,
+    member.registration_date, member.registrationDate,
+    member.가입일자, member.가입일, member.가입날짜, member.협회가입일자, member.회원가입일자
+  );
+  return rawStatus.includes("가입") || !!mapped.joinDate || isJoinMarker(rawJoinDate);
+}
+
+function mergeMembers(...groups: any[][]): any[] {
+  const map = new Map<string, any>();
+  for (const group of groups) {
+    for (const member of group || []) {
+      const key = memberKey(member);
+      if (!map.has(key)) map.set(key, member);
+      else map.set(key, { ...member, ...map.get(key) });
+    }
+  }
+  return Array.from(map.values());
 }
 
 export const billingRouter = router({
@@ -900,32 +978,24 @@ export const billingRouter = router({
       let closuresCount = 0;
 
       if (input?.includeMembers !== false) {
-        // 1단계는 회원관리시스템의 개인회원 탭에서 "가입" 상태인 사람만 직접 조회한다.
-        // 회원관리시스템 API 기준:
-        // - status: active/closed/all (폐업 제외용)
-        // - category: 개인/택배
-        // - membership_status: 가입/미가입
-        // 따라서 status=가입 이 아니라 membership_status=가입 을 써야 한다.
-        let members = await fetchAllPagedFromMemberSystem(
+        // 1단계는 회원관리시스템의 개인회원 탭에서 가입 상태인 일반 차량만 조회한다.
+        // 일부 배포본은 membership_status 필터가 1,089건 중 일부만 반환하므로,
+        // 필터 조회 + 개인 전체 조회 + active 전체 조회를 합친 뒤 미수금 시스템에서 최종 필터링한다.
+        const joinedFiltered = await fetchAllPagedFromMemberSystem(
           baseUrl,
           "/api/members?status=active&category=%EA%B0%9C%EC%9D%B8&membership_status=%EA%B0%80%EC%9E%85",
           auth
         );
+        const personalAll = await fetchAllPagedFromMemberSystem(
+          baseUrl,
+          "/api/members?status=active&category=%EA%B0%9C%EC%9D%B8",
+          auth
+        );
+        const activeAll = await fetchAllPagedFromMemberSystem(baseUrl, "/api/members?status=active", auth);
 
-        // 혹시 배포본에 필터 파라미터가 다르게 동작해 0건이 오면, 전체 active 회원을 읽은 뒤
-        // 미수금 시스템에서 안전하게 개인+가입+배번호 제외 조건으로 필터링한다.
-        if (members.length === 0) {
-          const fallbackMembers = await fetchAllPagedFromMemberSystem(baseUrl, "/api/members?status=active", auth);
-          members = fallbackMembers.filter((member: any) => {
-            const vehicleNo = String(firstValue(member.vehicle_number, member.vehicleNo, member.car_number, member.차량번호) || "");
-            const category = String(firstValue(member.category, member.구분) || "");
-            const membershipStatus = String(firstValue(member.membership_status, member.가입여부, member.status) || "");
-            return !vehicleNo.includes("배")
-              && (category === "개인" || category === "개인회원" || category === "" || !category.includes("택배"))
-              && membershipStatus.includes("가입")
-              && !membershipStatus.includes("미가입");
-          });
-        }
+        const mergedMembers = mergeMembers(joinedFiltered, personalAll, activeAll);
+        const members = mergedMembers.filter(isStep1JoinedGeneralMember);
+
         membersCount = members.length;
         rows.push(...members.map(mapMemberSystemMemberToImportRow));
       }
