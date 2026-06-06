@@ -14,7 +14,7 @@ import {
   getDb,
 } from "../db";
 import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { eq, like } from "drizzle-orm";
 import { billingCandidates } from "../../drizzle/schema";
 
 // 회원관리시스템 날짜 포맷 정규화
