@@ -577,14 +577,15 @@ function memberKey(member: any): string {
 function looksLikePersonalCategory(member: any): boolean {
   const category = String(firstValue(member.category, member.member_category, member.memberType, member.구분, member.회원구분) || "").trim();
   if (!category) return true;
-  if (category.includes("택배")) return false;
-  return category.includes("개인") || category.includes("일반") || category === "회원" || category === "개인회원";
+  // 1단계 최종 기준은 "배번호 제외 일반 가입자"다.
+  // 회원관리시스템의 category 값은 배포본/과거자료에 따라 비어있거나 부정확할 수 있으므로
+  // category가 택배로 찍혀도 차량번호에 배가 없으면 일단 일반 후보로 둔다.
+  return true;
 }
 
 function isStep1JoinedGeneralMember(member: any): boolean {
   const vehicleNo = String(firstValue(member.vehicle_number, member.vehicleNo, member.car_number, member.차량번호) || "").trim();
   if (!vehicleNo || vehicleNo.includes("배")) return false;
-  if (!looksLikePersonalCategory(member)) return false;
 
   const rawStatus = getRawJoinStatus(member);
   const normalizedStatus = rawStatus.toLowerCase();
@@ -593,6 +594,7 @@ function isStep1JoinedGeneralMember(member: any): boolean {
   // 회원관리시스템 배포본마다 가입 여부 필드명이 달라서 다음 조건 중 하나면 가입자로 본다.
   // 1) membership_status/가입여부가 가입
   // 2) 가입일자 계열 필드가 있음
+  // 3) 오래된 가입자 표시값 o/O/ㅇ/○가 있음
   // 단, 명시적 미가입은 위에서 제외한다.
   const mapped = mapMemberSystemMemberToImportRow(member) as any;
   const rawJoinDate = firstValue(
@@ -978,9 +980,9 @@ export const billingRouter = router({
       let closuresCount = 0;
 
       if (input?.includeMembers !== false) {
-        // 1단계는 회원관리시스템의 개인회원 탭에서 가입 상태인 일반 차량만 조회한다.
-        // 일부 배포본은 membership_status 필터가 1,089건 중 일부만 반환하므로,
-        // 필터 조회 + 개인 전체 조회 + active 전체 조회를 합친 뒤 미수금 시스템에서 최종 필터링한다.
+        // 1단계는 회원관리시스템 개인/일반 가입자 중 배번호 제외 차량만 협회비 후보로 본다.
+        // 회원관리시스템 API 필터가 일부 과거자료를 누락할 수 있으므로,
+        // 여러 조회 결과를 합친 뒤 미수금 시스템에서 최종 필터링한다.
         const joinedFiltered = await fetchAllPagedFromMemberSystem(
           baseUrl,
           "/api/members?status=active&category=%EA%B0%9C%EC%9D%B8&membership_status=%EA%B0%80%EC%9E%85",
@@ -992,8 +994,14 @@ export const billingRouter = router({
           auth
         );
         const activeAll = await fetchAllPagedFromMemberSystem(baseUrl, "/api/members?status=active", auth);
+        const allMembers = await fetchAllPagedFromMemberSystem(baseUrl, "/api/members", auth);
+        const personalNoStatus = await fetchAllPagedFromMemberSystem(
+          baseUrl,
+          "/api/members?category=%EA%B0%9C%EC%9D%B8",
+          auth
+        );
 
-        const mergedMembers = mergeMembers(joinedFiltered, personalAll, activeAll);
+        const mergedMembers = mergeMembers(joinedFiltered, personalAll, activeAll, allMembers, personalNoStatus);
         const members = mergedMembers.filter(isStep1JoinedGeneralMember);
 
         membersCount = members.length;
