@@ -231,78 +231,25 @@ function makeRegisterPreviewItem(params: {
 }
 
 function buildRegisterPreviewItems(row: z.infer<typeof registerRowSchema>, list: any[], nextIndex: () => number): PreviewRegisterItem[] {
-  const items: PreviewRegisterItem[] = [];
   const isBaeVehicle = String(row.vehicleNo || "").includes("배");
 
-  // 1단계 확정 규칙 1:
-  // 일반 가입자(배번호 제외)는 가입일자가 있으면 협회비 대상이다.
-  // 배번호 차량은 이 규칙에서 제외하고 택배/관리비 규칙에서 따로 판단한다.
-  if (!isBaeVehicle && hasValue(row.joinDate)) {
-    items.push(makeRegisterPreviewItem({
-      row,
-      rowIndex: nextIndex(),
-      list,
-      billingType: "협회비",
-      billingStartMonth: nextBillingMonth(row.joinDate) || "",
-      status: "대기",
-      billingSource: "가입일자",
-      reason: "일반 가입자(배번호 제외) 가입일자 기준 협회비",
-    }));
-    return items;
-  }
+  // 1단계 확정 규칙:
+  // 일반 가입자(배번호 제외) 중 가입일자가 있는 사람만 협회비 부과대상으로 추출한다.
+  // 배번호/택배/관리비 대상은 이번 1단계에서 완전히 제외한다.
+  // 가입일자가 없는 일반 차량도 부과대상 명단에는 포함하지 않는다.
+  if (isBaeVehicle) return [];
+  if (!hasValue(row.joinDate)) return [];
 
-  // 배번호 차량은 가입일자 협회비 규칙에서 제외한다.
-  // 택배/관리비 규칙은 별도 기준으로 판단한다.
-  if (isBaeVehicle || row.memberType === "택배회원") {
-    const hasApproval = hasValue(row.approvalDate);
-    const hasCertificate = hasValue(row.certificateDate);
-
-    if (hasApproval && hasCertificate) {
-      items.push(makeRegisterPreviewItem({
-        row,
-        rowIndex: nextIndex(),
-        list,
-        billingType: "관리비",
-        billingStartMonth: nextBillingMonth(row.certificateDate) || "",
-        status: "대기",
-        billingSource: "인가일자+자격증명",
-        reason: "가입일자 없음 / 인가일자 및 자격증명발급일자 기준 관리비",
-      }));
-      return items;
-    }
-
-    if (hasApproval || hasCertificate) {
-      const missing = !hasApproval ? "인가일자 누락" : "자격증명발급일자 누락";
-      items.push(makeRegisterPreviewItem({
-        row,
-        rowIndex: nextIndex(),
-        list,
-        billingType: "확인필요",
-        billingStartMonth: "",
-        status: "확인필요",
-        billingSource: "확인필요",
-        reason: `가입일자 없음 / 택배 관리비 ${missing}`,
-      }));
-      return items;
-    }
-  }
-
-  // 3) 아무 부과항목도 만들 수 없으면 확인필요
-  const reason = isBaeVehicle || row.memberType === "택배회원"
-    ? "배번호 차량 / 인가일자·자격증명발급일자 부족"
-    : "일반 가입자(배번호 제외) 가입일자 누락";
-  items.push(makeRegisterPreviewItem({
+  return [makeRegisterPreviewItem({
     row,
     rowIndex: nextIndex(),
     list,
-    billingType: "확인필요",
-    billingStartMonth: "",
-    status: "확인필요",
-    billingSource: "확인필요",
-    reason,
-  }));
-
-  return items;
+    billingType: "협회비",
+    billingStartMonth: nextBillingMonth(row.joinDate) || "",
+    status: "대기",
+    billingSource: "가입일자",
+    reason: "일반 가입자(배번호 제외) 가입일자 기준 협회비",
+  })];
 }
 
 async function buildPreview(rows: ImportRow[]): Promise<PreviewItem[]> {
