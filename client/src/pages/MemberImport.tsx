@@ -14,6 +14,8 @@ import {
   CalendarX,
   ArrowRight,
   Loader2,
+  Database,
+  RefreshCw,
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
@@ -144,6 +146,14 @@ export default function MemberImport() {
   const [inputText, setInputText] = useState("");
   const [parseError, setParseError] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewItem[] | null>(null);
+  const [currentRows, setCurrentRows] = useState<ImportRow[] | null>(null);
+  const [previewSource, setPreviewSource] = useState<"manual" | "member-system" | null>(null);
+  const [memberSystemSummary, setMemberSystemSummary] = useState<{
+    membersCount: number;
+    closuresCount: number;
+    totalRows: number;
+    baseUrl: string;
+  } | null>(null);
   const [selectedIndexes, setSelectedIndexes] = useState<Set<number>>(new Set());
   const [applyResult, setApplyResult] = useState<{
     successCount: number;
@@ -160,6 +170,22 @@ export default function MemberImport() {
     },
     onError: (err) => {
       toast.error(err.message || "미리보기 실패");
+    },
+  });
+
+  const memberSystemPreviewMutation = trpc.billing.fetchFromMemberSystemPreview.useMutation({
+    onSuccess: (data) => {
+      setCurrentRows(data.rows as ImportRow[]);
+      setPreview(data.items as PreviewItem[]);
+      setSelectedIndexes(new Set(data.items.map((i: any) => i.rowIndex)));
+      setPreviewSource("member-system");
+      setMemberSystemSummary(data.source);
+      setApplyResult(null);
+      setParseError(null);
+      toast.success(`회원관리시스템에서 ${data.source.totalRows}건을 읽어왔습니다.`);
+    },
+    onError: (err) => {
+      toast.error(err.message || "회원관리시스템 조회 실패");
     },
   });
 
@@ -186,6 +212,9 @@ export default function MemberImport() {
       setInputText(ev.target?.result as string);
       setParseError(null);
       setPreview(null);
+      setCurrentRows(null);
+      setPreviewSource(null);
+      setMemberSystemSummary(null);
     };
     reader.readAsText(file, "utf-8");
   };
@@ -209,6 +238,9 @@ export default function MemberImport() {
       setParseError("처리할 데이터가 없습니다.");
       return;
     }
+    setCurrentRows(rows);
+    setPreviewSource("manual");
+    setMemberSystemSummary(null);
     previewMutation.mutate({ rows });
   };
 
@@ -230,20 +262,32 @@ export default function MemberImport() {
     }
   };
 
+  const handleFetchFromMemberSystem = () => {
+    setParseError(null);
+    setApplyResult(null);
+    setPreview(null);
+    setCurrentRows(null);
+    setPreviewSource(null);
+    setMemberSystemSummary(null);
+    memberSystemPreviewMutation.mutate({ includeMembers: true, includeClosures: true });
+  };
+
   const handleApply = () => {
     if (!preview || selectedIndexes.size === 0) return;
-    const trimmed = inputText.trim();
-    let rows: ImportRow[];
-    try {
-      if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
-        const parsed = JSON.parse(trimmed);
-        rows = Array.isArray(parsed) ? parsed : [parsed];
-      } else {
-        rows = parseCSV(trimmed);
+    let rows = currentRows;
+    if (!rows) {
+      const trimmed = inputText.trim();
+      try {
+        if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+          const parsed = JSON.parse(trimmed);
+          rows = Array.isArray(parsed) ? parsed : [parsed];
+        } else {
+          rows = parseCSV(trimmed);
+        }
+      } catch {
+        toast.error("원본 데이터 파싱 오류");
+        return;
       }
-    } catch {
-      toast.error("원본 데이터 파싱 오류");
-      return;
     }
     applyMutation.mutate({ rows, selectedIndexes: Array.from(selectedIndexes) });
   };
@@ -265,7 +309,7 @@ export default function MemberImport() {
       <div>
         <h1 className="text-xl font-bold text-slate-900">회원관리 자료 불러오기</h1>
         <p className="text-sm text-slate-500 mt-0.5">
-          외부 회원관리 시스템 자료를 CSV 또는 JSON으로 불러와 부과 대상자에 반영합니다.
+          회원관리시스템을 읽기 전용으로 직접 조회하거나, 비상용 CSV/JSON 자료를 불러와 부과 대상자에 반영합니다.
         </p>
       </div>
 
@@ -290,12 +334,54 @@ export default function MemberImport() {
         </div>
       )}
 
+      {/* Direct member-system fetch */}
+      <Card className="bg-white border border-indigo-100 rounded-xl shadow-sm">
+        <CardHeader className="pb-3 pt-4 px-5 border-b border-indigo-50">
+          <CardTitle className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+            <Database className="w-4 h-4 text-indigo-500" />
+            회원관리시스템 직접 연결
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="px-5 py-4 space-y-3">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            <div>
+              <p className="text-sm text-slate-700 font-medium">기존 회원관리시스템에서 신규 회원과 폐업·양도·이관 자료를 읽어옵니다.</p>
+              <p className="text-xs text-slate-500 mt-1">
+                이 단계는 읽기 전용입니다. 회원관리시스템의 자료는 수정하지 않고, 미리보기 후 선택한 건만 미수금 시스템에 반영합니다.
+              </p>
+            </div>
+            <Button
+              onClick={handleFetchFromMemberSystem}
+              disabled={memberSystemPreviewMutation.isPending}
+              className="bg-indigo-600 hover:bg-indigo-700 gap-1.5 whitespace-nowrap"
+            >
+              {memberSystemPreviewMutation.isPending ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="w-3.5 h-3.5" />
+              )}
+              {memberSystemPreviewMutation.isPending ? "불러오는 중..." : "회원관리시스템에서 불러오기"}
+            </Button>
+          </div>
+          <div className="text-xs text-slate-400 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+            필요 환경변수: <span className="font-mono text-slate-600">MEMBER_SYSTEM_BASE_URL</span>, <span className="font-mono text-slate-600">MEMBER_SYSTEM_USERNAME</span>, <span className="font-mono text-slate-600">MEMBER_SYSTEM_PASSWORD</span>
+          </div>
+          {memberSystemSummary && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">회원 {memberSystemSummary.membersCount}건</div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">폐업·양도·이관 {memberSystemSummary.closuresCount}건</div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 truncate">출처 {memberSystemSummary.baseUrl}</div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Input area */}
       <Card className="bg-white border border-slate-200 rounded-xl shadow-sm">
         <CardHeader className="pb-3 pt-4 px-5 border-b border-slate-100">
           <CardTitle className="text-sm font-semibold text-slate-700 flex items-center gap-2">
             <FileText className="w-4 h-4 text-slate-400" />
-            자료 입력
+            비상용 CSV / JSON 직접 입력
           </CardTitle>
         </CardHeader>
         <CardContent className="px-5 py-4 space-y-3">
@@ -308,9 +394,9 @@ export default function MemberImport() {
               className="gap-1.5"
             >
               <Upload className="w-3.5 h-3.5" />
-              CSV 파일 선택
+              CSV/JSON 파일 선택
             </Button>
-            <span className="text-xs text-slate-400">또는 아래에 CSV / JSON을 직접 붙여넣기</span>
+            <span className="text-xs text-slate-400">회원관리시스템 직접 연결이 안 될 때만 사용하는 비상용 입력입니다.</span>
             <input
               ref={fileInputRef}
               type="file"
@@ -329,6 +415,9 @@ export default function MemberImport() {
               setInputText(e.target.value);
               setParseError(null);
               setPreview(null);
+              setCurrentRows(null);
+              setPreviewSource(null);
+              setMemberSystemSummary(null);
             }}
           />
 
@@ -362,6 +451,9 @@ export default function MemberImport() {
                 setInputText(SAMPLE_CSV);
                 setParseError(null);
                 setPreview(null);
+                setCurrentRows(null);
+                setPreviewSource(null);
+                setMemberSystemSummary(null);
               }}
             >
               예시 데이터 불러오기
@@ -412,7 +504,7 @@ export default function MemberImport() {
             <CardHeader className="pb-3 pt-4 px-5 border-b border-slate-100">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-sm font-semibold text-slate-700">
-                  미리보기 목록 ({preview.length}건)
+                  미리보기 목록 ({preview.length}건 · {previewSource === "member-system" ? "회원관리시스템 직접조회" : "직접 입력"})
                 </CardTitle>
                 <div className="flex items-center gap-3">
                   <button
@@ -523,7 +615,7 @@ export default function MemberImport() {
           <div className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-5 py-4">
             <div className="text-sm text-slate-600">
               선택된 <strong className="text-slate-900">{selectedIndexes.size}건</strong>을 부과 대상자 / 폐업 현황에 반영합니다.
-              기존 납부 이력은 변경되지 않습니다.
+              회원관리시스템과 기존 납부 이력은 변경되지 않습니다.
             </div>
             <Button
               onClick={handleApply}

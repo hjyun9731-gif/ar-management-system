@@ -150,7 +150,7 @@ interface PreviewRegisterItem {
 interface PreviewClosureItem {
   rowIndex: number;
   type: "CLOSURE";
-  category: "폐업양도이관";
+  category: "폐업양도이관" | "확인필요";
   sourceSystemId: string;
   vehicleNo: string;
   name: string;
@@ -223,11 +223,15 @@ async function buildPreview(rows: ImportRow[]): Promise<PreviewItem[]> {
       });
     } else {
       // CLOSURE
-      const processDate = new Date(row.processDate);
-      const nextMonthVal = processDate.getMonth() + 2;
-      const nextYear = nextMonthVal > 12 ? processDate.getFullYear() + 1 : processDate.getFullYear();
-      const nextMonth = nextMonthVal > 12 ? nextMonthVal - 12 : nextMonthVal;
-      const excludeStartMonth = `${nextYear}-${String(nextMonth).padStart(2, "0")}`;
+      const processDate = row.processDate ? new Date(row.processDate) : null;
+      const hasValidProcessDate = !!processDate && !Number.isNaN(processDate.getTime());
+      let excludeStartMonth = "";
+      if (hasValidProcessDate) {
+        const nextMonthVal = processDate!.getMonth() + 2;
+        const nextYear = nextMonthVal > 12 ? processDate!.getFullYear() + 1 : processDate!.getFullYear();
+        const nextMonth = nextMonthVal > 12 ? nextMonthVal - 12 : nextMonthVal;
+        excludeStartMonth = `${nextYear}-${String(nextMonth).padStart(2, "0")}`;
+      }
 
       const matched = list.find(
         (c: any) => c.vehicleNo === row.vehicleNo || c.managementNo === row.managementNo
@@ -236,20 +240,153 @@ async function buildPreview(rows: ImportRow[]): Promise<PreviewItem[]> {
       items.push({
         rowIndex: i,
         type: "CLOSURE",
-        category: "폐업양도이관",
+        category: hasValidProcessDate ? "폐업양도이관" : "확인필요",
         sourceSystemId: row.sourceSystemId,
         vehicleNo: row.vehicleNo,
         name: row.name,
         closureType: row.closureType,
         excludeStartMonth,
         matchedCandidateId: matched?.id,
-        reason: matched ? undefined : "부과 대상자 미등록 (신규 등록 필요)",
+        reason: !hasValidProcessDate
+          ? "처리일자 누락 또는 형식 오류"
+          : matched ? undefined : "부과 대상자 미등록 (신규 등록 필요)",
         raw: row,
       });
     }
   }
 
   return items;
+}
+
+
+// ---- Direct read-only fetch from member-management system ----
+type MemberSystemAuth = { authorization?: string };
+
+function cleanBaseUrl(url?: string): string {
+  return (url || "").trim().replace(/\/+$/, "");
+}
+
+async function getMemberSystemAuth(baseUrl: string): Promise<MemberSystemAuth> {
+  const token = process.env.MEMBER_SYSTEM_API_TOKEN?.trim();
+  if (token) return { authorization: `Bearer ${token}` };
+
+  const username = process.env.MEMBER_SYSTEM_USERNAME?.trim();
+  const password = process.env.MEMBER_SYSTEM_PASSWORD?.trim();
+  if (!username || !password) return {};
+
+  const body = new URLSearchParams();
+  body.set("username", username);
+  body.set("password", password);
+
+  const res = await fetch(`${baseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new TRPCError({
+      code: "UNAUTHORIZED",
+      message: `회원관리시스템 로그인 실패 (${res.status}) ${text}`.trim(),
+    });
+  }
+
+  const data: any = await res.json();
+  if (!data?.access_token) {
+    throw new TRPCError({ code: "UNAUTHORIZED", message: "회원관리시스템 로그인 응답에 access_token이 없습니다." });
+  }
+
+  return { authorization: `${data.token_type || "bearer"} ${data.access_token}` };
+}
+
+async function memberSystemGet(baseUrl: string, path: string, auth: MemberSystemAuth): Promise<any> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (auth.authorization) headers.Authorization = auth.authorization;
+
+  const res = await fetch(`${baseUrl}${path}`, { method: "GET", headers });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new TRPCError({
+      code: res.status === 401 || res.status === 403 ? "UNAUTHORIZED" : "BAD_REQUEST",
+      message: `회원관리시스템 조회 실패: GET ${path} (${res.status}) ${text}`.trim(),
+    });
+  }
+  return await res.json();
+}
+
+async function fetchAllPagedFromMemberSystem(baseUrl: string, path: string, auth: MemberSystemAuth, maxPages = 200): Promise<any[]> {
+  const items: any[] = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const separator = path.includes("?") ? "&" : "?";
+    const data = await memberSystemGet(baseUrl, `${path}${separator}page=${page}&limit=200`, auth);
+    const pageItems = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
+    items.push(...pageItems);
+
+    if (Array.isArray(data)) break;
+    const pages = Number(data?.pages || 1);
+    if (page >= pages || pageItems.length === 0) break;
+  }
+  return items;
+}
+
+function toDateString(value: any): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  const text = String(value).trim();
+  if (!text) return undefined;
+  // API already returns YYYY-MM-DD for most fields. Keep the date part only.
+  const m = text.match(/\d{4}[-.]\d{1,2}[-.]\d{1,2}/);
+  if (!m) return text;
+  return m[0].replace(/\./g, "-").replace(/-(\d)(?=-|$)/g, "-0$1");
+}
+
+function mapMemberType(category: any, vehicleNo?: string): "개인회원" | "택배회원" {
+  const value = String(category || "").trim();
+  if (value.includes("택배") || String(vehicleNo || "").includes("배")) return "택배회원";
+  return "개인회원";
+}
+
+function normalizeClosureTypeForImport(value: any): "폐업" | "양도" | "이관" {
+  const text = String(value || "폐업").trim();
+  if (text.includes("양")) return "양도";
+  if (text.includes("이") || text.includes("타도")) return "이관";
+  return "폐업";
+}
+
+function mapMemberSystemMemberToImportRow(member: any): ImportRow {
+  const vehicleNo = member.vehicle_number || member.vehicleNo || "";
+  return {
+    type: "REGISTER",
+    sourceSystemId: `MEMBER-${member.id ?? member.sourceSystemId ?? vehicleNo}`,
+    managementNo: member.management_number || member.managementNo || undefined,
+    region: member.region || undefined,
+    vehicleNo,
+    name: member.name || "",
+    rrn: member.resident_number || member.rrn || undefined,
+    mobile: member.mobile || undefined,
+    memberType: mapMemberType(member.category, vehicleNo),
+    joinDate: toDateString(member.membership_date || member.joinDate),
+    certificateDate: toDateString(member.certificate_issue_date || member.certificateDate),
+    vehicleType: member.vehicle_type || undefined,
+    businessNo: member.business_number || undefined,
+    company: member.affiliated_company || member.company_name || undefined,
+    memo: member.memo || undefined,
+  };
+}
+
+function mapMemberSystemClosureToImportRow(closure: any): ImportRow {
+  const vehicleNo = closure.vehicle_number || closure.vehicleNo || "";
+  return {
+    type: "CLOSURE",
+    sourceSystemId: `CLOSURE-${closure.id ?? closure.sourceSystemId ?? vehicleNo}`,
+    closureType: normalizeClosureTypeForImport(closure.closure_type || closure.closureType),
+    managementNo: closure.management_number || closure.managementNo || "",
+    region: closure.region || undefined,
+    vehicleNo,
+    name: closure.name || "",
+    processDate: toDateString(closure.closure_date || closure.processDate || closure.approval_date || closure.created_at) || "",
+    receiptDate: toDateString(closure.receipt_date || closure.receiptDate),
+  };
 }
 
 export const billingRouter = router({
@@ -584,6 +721,54 @@ export const billingRouter = router({
     };
   }),
 
+  // 회원관리시스템 직접 불러오기 - 읽기 전용 미리보기 (DB 쓰기 없음)
+  fetchFromMemberSystemPreview: publicProcedure
+    .input(
+      z.object({
+        includeMembers: z.boolean().optional().default(true),
+        includeClosures: z.boolean().optional().default(true),
+      }).optional()
+    )
+    .mutation(async ({ input }) => {
+      const baseUrl = cleanBaseUrl(process.env.MEMBER_SYSTEM_BASE_URL);
+      if (!baseUrl) {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "MEMBER_SYSTEM_BASE_URL 환경변수가 설정되지 않았습니다.",
+        });
+      }
+
+      const auth = await getMemberSystemAuth(baseUrl);
+      const rows: ImportRow[] = [];
+      let membersCount = 0;
+      let closuresCount = 0;
+
+      if (input?.includeMembers !== false) {
+        const members = await fetchAllPagedFromMemberSystem(baseUrl, "/api/members?status=all", auth);
+        membersCount = members.length;
+        rows.push(...members.map(mapMemberSystemMemberToImportRow));
+      }
+
+      if (input?.includeClosures !== false) {
+        const closures = await fetchAllPagedFromMemberSystem(baseUrl, "/api/closures", auth);
+        closuresCount = closures.length;
+        rows.push(...closures.map(mapMemberSystemClosureToImportRow));
+      }
+
+      const items = await buildPreview(rows);
+      return {
+        rows,
+        items,
+        source: {
+          baseUrl,
+          membersCount,
+          closuresCount,
+          totalRows: rows.length,
+          authMode: process.env.MEMBER_SYSTEM_API_TOKEN ? "token" : process.env.MEMBER_SYSTEM_USERNAME ? "password" : "none",
+        },
+      };
+    }),
+
   // 회원관리 자료 불러오기 - 미리보기 (DB 쓰기 없음)
   previewImport: publicProcedure
     .input(z.object({ rows: z.array(importRowSchema) }))
@@ -661,7 +846,17 @@ export const billingRouter = router({
           } else {
             // CLOSURE
             const row = item.raw as z.infer<typeof closureRowSchema>;
-            const processDate = new Date(row.processDate);
+            const processDate = row.processDate ? new Date(row.processDate) : null;
+            if (!processDate || Number.isNaN(processDate.getTime())) {
+              await createSyncLog({
+                eventType: "IMPORT",
+                sourceId: row.sourceSystemId,
+                status: "WARNING",
+                message: "폐업/양도/이관 처리일자 누락으로 반영 보류",
+              });
+              results.push({ rowIndex: item.rowIndex, status: "warning", message: "처리일자 누락 - 반영 보류" });
+              continue;
+            }
             const nextMonthVal = processDate.getMonth() + 2;
             const nextYear = nextMonthVal > 12 ? processDate.getFullYear() + 1 : processDate.getFullYear();
             const nextMonth = nextMonthVal > 12 ? nextMonthVal - 12 : nextMonthVal;
