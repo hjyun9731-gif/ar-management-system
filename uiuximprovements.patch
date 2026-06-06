@@ -1,0 +1,3015 @@
+diff --git a/client/src/components/CandidateDetailModal.tsx b/client/src/components/CandidateDetailModal.tsx
+index 2a3ea70..7a4c7dc 100644
+--- a/client/src/components/CandidateDetailModal.tsx
++++ b/client/src/components/CandidateDetailModal.tsx
+@@ -1,11 +1,9 @@
+ import { useState } from "react";
+ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+ import { Button } from "@/components/ui/button";
+-import { Badge } from "@/components/ui/badge";
+ import { Input } from "@/components/ui/input";
+ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+-import { AlertCircle } from "lucide-react";
++import { AlertTriangle, Car, User, FileText, Database, Edit2 } from "lucide-react";
+ import { trpc } from "@/lib/trpc";
+ import { toast } from "sonner";
+ 
+@@ -15,6 +13,21 @@ interface CandidateDetailModalProps {
+   candidateId: number;
+ }
+ 
++const STATUS_STYLE: Record<string, string> = {
++  대기: "bg-amber-50 text-amber-700 border border-amber-200",
++  부과예정: "bg-sky-50 text-sky-700 border border-sky-200",
++  부과반영완료: "bg-emerald-50 text-emerald-700 border border-emerald-200",
++  확인필요: "bg-red-50 text-red-700 border border-red-200",
++  보류: "bg-slate-100 text-slate-600 border border-slate-200",
++  제외: "bg-gray-50 text-gray-500 border border-gray-200",
++};
++
++const BILLING_TYPE_STYLE: Record<string, string> = {
++  협회비: "bg-emerald-50 text-emerald-700 border border-emerald-200",
++  관리비: "bg-indigo-50 text-indigo-700 border border-indigo-200",
++  확인필요: "bg-amber-50 text-amber-700 border border-amber-200",
++};
++
+ function getCalculationReason(
+   memberType: string,
+   joinDate?: string,
+@@ -22,24 +35,35 @@ function getCalculationReason(
+   billingType?: string
+ ): string {
+   if (billingType === "확인필요") {
+-    if (memberType === "개인회원" && !joinDate) {
+-      return "joinDate 누락 - 협회비 판정 불가";
+-    }
+-    if (memberType === "택배회원" && !certificateDate) {
+-      return "certificateDate 누락 - 관리비 판정 불가";
+-    }
++    if (memberType === "개인회원" && !joinDate) return "joinDate 누락 - 협회비 판정 불가";
++    if (memberType === "택배회원" && !certificateDate) return "certificateDate 누락 - 관리비 판정 불가";
+     return "필수 정보 누락";
+   }
+-
+-  if (memberType === "개인회원" && billingType === "협회비") {
+-    return `협회비: joinDate(${joinDate}) 기준 다음 달`;
+-  }
+-  if (memberType === "택배회원" && billingType === "관리비") {
+-    return `관리비: certificateDate(${certificateDate}) 기준 다음 달`;
+-  }
++  if (memberType === "개인회원" && billingType === "협회비") return `협회비: joinDate(${joinDate}) 기준 다음 달`;
++  if (memberType === "택배회원" && billingType === "관리비") return `관리비: certificateDate(${certificateDate}) 기준 다음 달`;
+   return "";
+ }
+ 
++function InfoRow({ label, value }: { label: string; value?: string | null }) {
++  return (
++    <div>
++      <dt className="text-xs font-medium text-slate-400 mb-0.5">{label}</dt>
++      <dd className="text-sm text-slate-800 font-medium">{value || <span className="text-slate-300 font-normal">-</span>}</dd>
++    </div>
++  );
++}
++
++function SectionHeader({ icon: Icon, title }: { icon: React.ElementType; title: string }) {
++  return (
++    <div className="flex items-center gap-2 pb-2 border-b border-slate-100 mb-3">
++      <div className="w-6 h-6 rounded-lg bg-slate-100 flex items-center justify-center">
++        <Icon className="w-3.5 h-3.5 text-slate-500" />
++      </div>
++      <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{title}</span>
++    </div>
++  );
++}
++
+ export function CandidateDetailModal({ open, onOpenChange, candidateId }: CandidateDetailModalProps) {
+   const [isEditing, setIsEditing] = useState(false);
+   const [formData, setFormData] = useState({
+@@ -67,18 +91,18 @@ export function CandidateDetailModal({ open, onOpenChange, candidateId }: Candid
+   if (!candidate && isLoading) {
+     return (
+       <Dialog open={open} onOpenChange={onOpenChange}>
+-        <DialogContent>
+-          <div className="flex items-center justify-center py-8">
+-            <span className="text-gray-500">로딩 중...</span>
++        <DialogContent className="max-w-2xl">
++          <div className="space-y-3 py-6 px-2">
++            {[...Array(5)].map((_, i) => (
++              <div key={i} className="h-8 bg-slate-100 rounded-lg animate-pulse" />
++            ))}
+           </div>
+         </DialogContent>
+       </Dialog>
+     );
+   }
+ 
+-  if (!candidate) {
+-    return null;
+-  }
++  if (!candidate) return null;
+ 
+   const handleSave = () => {
+     updateMutation.mutate({
+@@ -96,223 +120,217 @@ export function CandidateDetailModal({ open, onOpenChange, candidateId }: Candid
+     candidate.billingType
+   );
+ 
+-  const showWarnings = [
++  const warnings = [
+     candidate.memberType === "개인회원" && !candidate.joinDate && "joinDate 누락",
+     candidate.memberType === "택배회원" && !candidate.certificateDate && "certificateDate 누락",
+     candidate.status === "확인필요" && "확인 필요",
+     candidate.status === "보류" && "보류 중",
+     candidate.status === "제외" && "제외됨",
+-  ].filter(Boolean);
++  ].filter(Boolean) as string[];
+ 
+   return (
+     <Dialog open={open} onOpenChange={onOpenChange}>
+-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+-        <DialogHeader>
+-          <DialogTitle className="flex items-center gap-2">
++      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
++        <DialogHeader className="pb-3 border-b border-slate-100">
++          <DialogTitle className="flex items-center gap-2 text-base font-semibold text-slate-900">
+             부과 대상자 상세 정보
+-            {showWarnings.length > 0 && (
+-              <AlertCircle className="w-5 h-5 text-yellow-600" />
++            {warnings.length > 0 && (
++              <div className="w-5 h-5 rounded-full bg-amber-100 flex items-center justify-center">
++                <AlertTriangle className="w-3 h-3 text-amber-600" />
++              </div>
+             )}
+           </DialogTitle>
++          {/* Name + Vehicle chip */}
++          <div className="flex items-center gap-2 mt-1">
++            <span className="text-sm font-medium text-slate-700">{candidate.name}</span>
++            <span className="text-xs text-slate-400">·</span>
++            <span className="text-xs font-mono bg-slate-100 text-slate-600 px-2 py-0.5 rounded">{candidate.vehicleNo}</span>
++            <span className={`inline-flex items-center text-xs font-medium rounded-full px-2 py-0.5 ${STATUS_STYLE[candidate.status] ?? "bg-slate-100 text-slate-600"}`}>
++              {candidate.status}
++            </span>
++          </div>
+         </DialogHeader>
+ 
+-        <div className="space-y-4">
+-          {/* 경고 배지 */}
+-          {showWarnings.length > 0 && (
+-            <div className="flex flex-wrap gap-2">
+-              {showWarnings.map((warning, idx) => (
+-                <Badge key={idx} className="bg-yellow-100 text-yellow-800">
+-                  ⚠️ {warning}
+-                </Badge>
+-              ))}
++        <div className="space-y-5 py-2">
++          {/* Warnings */}
++          {warnings.length > 0 && (
++            <div className="flex flex-wrap gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
++              <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
++              <div className="flex flex-wrap gap-2">
++                {warnings.map((w, i) => (
++                  <span key={i} className="text-xs font-medium text-amber-800 bg-amber-100 border border-amber-200 rounded-full px-2 py-0.5">
++                    {w}
++                  </span>
++                ))}
++              </div>
+             </div>
+           )}
+ 
+-          {/* 기본 정보 */}
+-          <Card className="bg-white border border-gray-200">
+-            <CardHeader className="pb-3">
+-              <CardTitle className="text-sm font-semibold text-gray-900">기본 정보</CardTitle>
+-            </CardHeader>
+-            <CardContent className="space-y-3">
+-              <div className="grid grid-cols-2 gap-4">
+-                <div>
+-                  <label className="text-xs font-medium text-gray-600">성명</label>
+-                  <p className="text-sm text-gray-900 font-medium mt-1">{candidate.name}</p>
+-                </div>
+-                <div>
+-                  <label className="text-xs font-medium text-gray-600">회원 구분</label>
+-                  <Badge className="mt-1 bg-blue-100 text-blue-800">{candidate.memberType}</Badge>
+-                </div>
+-                <div>
+-                  <label className="text-xs font-medium text-gray-600">지역</label>
+-                  <p className="text-sm text-gray-900 mt-1">{candidate.region || "-"}</p>
+-                </div>
+-                <div>
+-                  <label className="text-xs font-medium text-gray-600">관리번호</label>
+-                  <p className="text-sm text-gray-900 mt-1">{candidate.managementNo || "-"}</p>
+-                </div>
++          {/* Basic Info */}
++          <div>
++            <SectionHeader icon={User} title="기본 정보" />
++            <dl className="grid grid-cols-2 gap-x-6 gap-y-3">
++              <InfoRow label="성명" value={candidate.name} />
++              <div>
++                <dt className="text-xs font-medium text-slate-400 mb-0.5">회원 구분</dt>
++                <dd>
++                  <span className="inline-flex items-center text-xs font-medium rounded-full px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200">
++                    {candidate.memberType}
++                  </span>
++                </dd>
+               </div>
+-            </CardContent>
+-          </Card>
++              <InfoRow label="지역" value={candidate.region} />
++              <InfoRow label="관리번호" value={candidate.managementNo} />
++            </dl>
++          </div>
+ 
+-          {/* 차량/사업 정보 */}
+-          <Card className="bg-white border border-gray-200">
+-            <CardHeader className="pb-3">
+-              <CardTitle className="text-sm font-semibold text-gray-900">차량/사업 정보</CardTitle>
+-            </CardHeader>
+-            <CardContent className="space-y-3">
+-              <div className="grid grid-cols-2 gap-4">
+-                <div>
+-                  <label className="text-xs font-medium text-gray-600">차량번호</label>
+-                  <p className="text-sm text-gray-900 font-medium mt-1">{candidate.vehicleNo}</p>
+-                </div>
+-                <div>
+-                  <label className="text-xs font-medium text-gray-600">차량 유형</label>
+-                  <p className="text-sm text-gray-900 mt-1">{candidate.vehicleType || "-"}</p>
+-                </div>
+-                <div>
+-                  <label className="text-xs font-medium text-gray-600">사업자번호</label>
+-                  <p className="text-sm text-gray-900 mt-1">{candidate.businessNo || "-"}</p>
+-                </div>
+-                <div>
+-                  <label className="text-xs font-medium text-gray-600">회사명</label>
+-                  <p className="text-sm text-gray-900 mt-1">{candidate.company || "-"}</p>
+-                </div>
+-              </div>
+-            </CardContent>
+-          </Card>
++          {/* Vehicle Info */}
++          <div>
++            <SectionHeader icon={Car} title="차량·사업 정보" />
++            <dl className="grid grid-cols-2 gap-x-6 gap-y-3">
++              <InfoRow label="차량번호" value={candidate.vehicleNo} />
++              <InfoRow label="차량 유형" value={candidate.vehicleType} />
++              <InfoRow label="사업자번호" value={candidate.businessNo} />
++              <InfoRow label="회사명" value={candidate.company} />
++            </dl>
++          </div>
+ 
+-          {/* 부과 정보 */}
+-          <Card className="bg-white border border-gray-200">
+-            <CardHeader className="pb-3">
+-              <CardTitle className="text-sm font-semibold text-gray-900">부과 정보</CardTitle>
+-            </CardHeader>
+-            <CardContent className="space-y-4">
+-              {/* 부과항목 및 계산 근거 */}
+-              <div className="bg-gray-50 p-3 rounded border border-gray-200">
++          {/* Billing Info */}
++          <div>
++            <SectionHeader icon={FileText} title="부과 정보" />
++            <div className="space-y-4">
++              {/* Billing Type + Reason */}
++              <div className="bg-slate-50 border border-slate-100 rounded-xl px-4 py-3">
+                 <div className="flex items-center justify-between mb-2">
+-                  <label className="text-xs font-medium text-gray-600">부과항목</label>
+-                  <Badge
+-                    className={
+-                      candidate.billingType === "협회비"
+-                        ? "bg-green-100 text-green-800"
+-                        : candidate.billingType === "관리비"
+-                          ? "bg-blue-100 text-blue-800"
+-                          : "bg-yellow-100 text-yellow-800"
+-                    }
+-                  >
++                  <span className="text-xs font-medium text-slate-500">부과항목</span>
++                  <span className={`inline-flex items-center text-xs font-medium rounded-full px-2 py-0.5 ${BILLING_TYPE_STYLE[candidate.billingType] ?? "bg-slate-100 text-slate-600"}`}>
+                     {candidate.billingType}
+-                  </Badge>
++                  </span>
+                 </div>
+-                <p className="text-xs text-gray-600 italic">{calculationReason}</p>
+-              </div>
+-
+-              {/* 부과시작월 */}
+-              <div>
+-                <label className="text-xs font-medium text-gray-600">부과시작월</label>
+-                {isEditing ? (
+-                  <Input
+-                    type="month"
+-                    value={formData.billingStartMonth || candidate.billingStartMonth || ""}
+-                    onChange={(e) => setFormData({ ...formData, billingStartMonth: e.target.value })}
+-                    className="mt-1"
+-                  />
+-                ) : (
+-                  <p className="text-sm text-gray-900 font-medium mt-1">
+-                    {candidate.billingStartMonth || "미정"}
+-                  </p>
++                {calculationReason && (
++                  <p className="text-xs text-slate-500 italic">{calculationReason}</p>
+                 )}
+               </div>
+ 
+-              {/* 상태 */}
+-              <div>
+-                <label className="text-xs font-medium text-gray-600">상태</label>
+-                {isEditing ? (
+-                  <Select value={formData.status || candidate.status} onValueChange={(v) => setFormData({ ...formData, status: v })}>
+-                    <SelectTrigger className="mt-1">
+-                      <SelectValue />
+-                    </SelectTrigger>
+-                    <SelectContent>
+-                      <SelectItem value="대기">대기</SelectItem>
+-                      <SelectItem value="부과예정">부과예정</SelectItem>
+-                      <SelectItem value="부과반영완료">부과반영완료</SelectItem>
+-                      <SelectItem value="확인필요">확인필요</SelectItem>
+-                      <SelectItem value="보류">보류</SelectItem>
+-                      <SelectItem value="제외">제외</SelectItem>
+-                    </SelectContent>
+-                  </Select>
+-                ) : (
+-                  <Badge className="mt-1 bg-purple-100 text-purple-800">{candidate.status}</Badge>
+-                )}
++              <div className="grid grid-cols-2 gap-4">
++                {/* billingStartMonth */}
++                <div>
++                  <label className="text-xs font-medium text-slate-400 block mb-1">부과시작월</label>
++                  {isEditing ? (
++                    <Input
++                      type="month"
++                      value={formData.billingStartMonth || candidate.billingStartMonth || ""}
++                      onChange={(e) => setFormData({ ...formData, billingStartMonth: e.target.value })}
++                      className="h-8 text-sm"
++                    />
++                  ) : (
++                    <p className="text-sm font-medium text-slate-800 font-mono">
++                      {candidate.billingStartMonth || <span className="text-slate-300 font-normal">미정</span>}
++                    </p>
++                  )}
++                </div>
++
++                {/* Status */}
++                <div>
++                  <label className="text-xs font-medium text-slate-400 block mb-1">상태</label>
++                  {isEditing ? (
++                    <Select
++                      value={formData.status || candidate.status}
++                      onValueChange={(v) => setFormData({ ...formData, status: v })}
++                    >
++                      <SelectTrigger className="h-8 text-sm">
++                        <SelectValue />
++                      </SelectTrigger>
++                      <SelectContent>
++                        <SelectItem value="대기">대기</SelectItem>
++                        <SelectItem value="부과예정">부과예정</SelectItem>
++                        <SelectItem value="부과반영완료">부과반영완료</SelectItem>
++                        <SelectItem value="확인필요">확인필요</SelectItem>
++                        <SelectItem value="보류">보류</SelectItem>
++                        <SelectItem value="제외">제외</SelectItem>
++                      </SelectContent>
++                    </Select>
++                  ) : (
++                    <span className={`inline-flex items-center text-xs font-medium rounded-full px-2 py-0.5 ${STATUS_STYLE[candidate.status] ?? "bg-slate-100 text-slate-600"}`}>
++                      {candidate.status}
++                    </span>
++                  )}
++                </div>
+               </div>
+ 
+-              {/* 메모 */}
++              {/* Memo */}
+               <div>
+-                <label className="text-xs font-medium text-gray-600">메모</label>
++                <label className="text-xs font-medium text-slate-400 block mb-1">메모</label>
+                 {isEditing ? (
+                   <textarea
+-                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-lg text-sm"
++                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-800 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                     rows={2}
+                     value={formData.memo || candidate.memo || ""}
+                     onChange={(e) => setFormData({ ...formData, memo: e.target.value })}
+                   />
+                 ) : (
+-                  <p className="text-sm text-gray-900 mt-1 min-h-8">{candidate.memo || "-"}</p>
++                  <p className="text-sm text-slate-700 min-h-[2rem]">
++                    {candidate.memo || <span className="text-slate-300">-</span>}
++                  </p>
+                 )}
+               </div>
+-            </CardContent>
+-          </Card>
++            </div>
++          </div>
+ 
+-          {/* 동기화 정보 */}
+-          <Card className="bg-white border border-gray-200">
+-            <CardHeader className="pb-3">
+-              <CardTitle className="text-sm font-semibold text-gray-900">동기화 정보</CardTitle>
+-            </CardHeader>
+-            <CardContent className="space-y-2 text-xs text-gray-600">
+-              <div className="flex justify-between">
+-                <span>원본 시스템 ID:</span>
+-                <span className="font-mono text-gray-900">{candidate.sourceSystemId}</span>
+-              </div>
+-              <div className="flex justify-between">
+-                <span>등록일시:</span>
+-                <span>{new Date(candidate.createdAt).toLocaleString("ko-KR")}</span>
++          {/* Sync Info */}
++          <div>
++            <SectionHeader icon={Database} title="동기화 정보" />
++            <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
++              <div>
++                <dt className="text-slate-400 font-medium mb-0.5">원본 시스템 ID</dt>
++                <dd className="font-mono text-slate-700">{candidate.sourceSystemId || "-"}</dd>
+               </div>
+-              <div className="flex justify-between">
+-                <span>수정일시:</span>
+-                <span>{new Date(candidate.updatedAt).toLocaleString("ko-KR")}</span>
++              <div>
++                <dt className="text-slate-400 font-medium mb-0.5">등록일시</dt>
++                <dd className="text-slate-700">{new Date(candidate.createdAt).toLocaleString("ko-KR")}</dd>
+               </div>
+               {candidate.joinDate && (
+-                <div className="flex justify-between">
+-                  <span>joinDate:</span>
+-                  <span>{new Date(candidate.joinDate).toLocaleDateString("ko-KR")}</span>
++                <div>
++                  <dt className="text-slate-400 font-medium mb-0.5">joinDate</dt>
++                  <dd className="font-mono text-slate-700">{new Date(candidate.joinDate).toLocaleDateString("ko-KR")}</dd>
+                 </div>
+               )}
+               {candidate.certificateDate && (
+-                <div className="flex justify-between">
+-                  <span>certificateDate:</span>
+-                  <span>{new Date(candidate.certificateDate).toLocaleDateString("ko-KR")}</span>
++                <div>
++                  <dt className="text-slate-400 font-medium mb-0.5">certificateDate</dt>
++                  <dd className="font-mono text-slate-700">{new Date(candidate.certificateDate).toLocaleDateString("ko-KR")}</dd>
+                 </div>
+               )}
+-            </CardContent>
+-          </Card>
++            </dl>
++          </div>
+         </div>
+ 
+-        <DialogFooter className="gap-2">
++        <DialogFooter className="gap-2 pt-3 border-t border-slate-100">
+           {isEditing ? (
+             <>
+-              <Button variant="outline" onClick={() => setIsEditing(false)}>
++              <Button variant="outline" size="sm" onClick={() => setIsEditing(false)}>
+                 취소
+               </Button>
+-              <Button onClick={handleSave} disabled={updateMutation.isPending} className="bg-blue-600 hover:bg-blue-700">
++              <Button
++                size="sm"
++                onClick={handleSave}
++                disabled={updateMutation.isPending}
++                className="bg-indigo-600 hover:bg-indigo-700 gap-1.5"
++              >
+                 {updateMutation.isPending ? "저장 중..." : "저장"}
+               </Button>
+             </>
+           ) : (
+             <>
+-              <Button variant="outline" onClick={() => onOpenChange(false)}>
++              <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+                 닫기
+               </Button>
+-              <Button onClick={() => setIsEditing(true)} className="bg-blue-600 hover:bg-blue-700">
++              <Button
++                size="sm"
++                onClick={() => setIsEditing(true)}
++                className="bg-indigo-600 hover:bg-indigo-700 gap-1.5"
++              >
++                <Edit2 className="w-3.5 h-3.5" />
+                 편집
+               </Button>
+             </>
+diff --git a/client/src/components/DashboardLayout.tsx b/client/src/components/DashboardLayout.tsx
+index f74ae22..3907806 100644
+--- a/client/src/components/DashboardLayout.tsx
++++ b/client/src/components/DashboardLayout.tsx
+@@ -2,9 +2,19 @@ import { useState } from "react";
+ import { Button } from "@/components/ui/button";
+ import { Input } from "@/components/ui/input";
+ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+-import { LogOut, Settings, BarChart3, Users, Trash2, FileText, Zap, Lock } from "lucide-react";
++import {
++  LogOut,
++  Settings,
++  LayoutDashboard,
++  Users,
++  CalendarCheck,
++  Building2,
++  Receipt,
++  Activity,
++  ChevronRight,
++  UserCircle,
++} from "lucide-react";
+ import { useLocation } from "wouter";
+-import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
+ import { useAuth } from "@/_core/hooks/useAuth";
+ import { toast } from "sonner";
+ 
+@@ -13,17 +23,22 @@ interface DashboardLayoutProps {
+ }
+ 
+ const NAV_ITEMS = [
+-  { label: "대시보드", href: "/", icon: BarChart3 },
++  { label: "대시보드", href: "/", icon: LayoutDashboard },
+   { label: "다음 달 부과 대상", href: "/candidates", icon: Users },
+-  { label: "이번 달 부과 예정", href: "/approval", icon: FileText },
+-  { label: "폐업 현황", href: "/closures", icon: Trash2 },
+-  { label: "납부현황", href: "/billing-records", icon: FileText },
+-  { label: "연동 로그", href: "/sync-logs", icon: Zap },
++  { label: "이번 달 부과 예정", href: "/approval", icon: CalendarCheck },
++  { label: "폐업·양도·이관 현황", href: "/closures", icon: Building2 },
++  { label: "납부현황", href: "/billing-records", icon: Receipt },
++  { label: "연동 로그", href: "/sync-logs", icon: Activity },
+ ];
+ 
++function getPageTitle(location: string): string {
++  const item = NAV_ITEMS.find((n) => n.href === location);
++  return item?.label ?? "관리 시스템";
++}
++
+ export default function DashboardLayout({ children }: DashboardLayoutProps) {
+   const [location, navigate] = useLocation();
+-  const { user, loading, logout } = useAuth();
++  const { user, logout } = useAuth();
+   const [showSimpleLogin, setShowSimpleLogin] = useState(false);
+   const [password, setPassword] = useState("");
+   const [isLoggingIn, setIsLoggingIn] = useState(false);
+@@ -31,26 +46,22 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
+   const handleSimpleLogin = async (e: React.FormEvent) => {
+     e.preventDefault();
+     setIsLoggingIn(true);
+-
+     try {
+       const response = await fetch("/api/auth/simple-login", {
+         method: "POST",
+         headers: { "Content-Type": "application/json" },
+         body: JSON.stringify({ password }),
+       });
+-
+       if (!response.ok) {
+         const error = await response.json();
+         toast.error(error.error || "로그인 실패");
+         return;
+       }
+-
+       toast.success("로그인 성공");
+       setPassword("");
+       setShowSimpleLogin(false);
+-      // Reload to refresh auth state
+       window.location.reload();
+-    } catch (error) {
++    } catch {
+       toast.error("로그인 중 오류 발생");
+     } finally {
+       setIsLoggingIn(false);
+@@ -62,26 +73,32 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
+       await logout();
+       toast.success("로그아웃 되었습니다");
+       navigate("/");
+-    } catch (error) {
++    } catch {
+       toast.error("로그아웃 중 오류 발생");
+     }
+   };
+ 
+-  // Don't block rendering while auth is loading - render with empty state if needed
+-  // Loading state is only shown in skeleton components within pages
++  const pageTitle = getPageTitle(location);
+ 
+   return (
+-    <div className="flex h-screen bg-gray-50">
++    <div className="flex h-screen bg-slate-50">
+       {/* Sidebar */}
+-      <aside className="hidden md:flex md:w-64 md:flex-col md:bg-gradient-to-b md:from-gray-900 md:to-gray-800 md:border-r md:border-gray-700 md:shadow-lg">
+-        <div className="flex items-center justify-center h-20 border-b border-gray-700">
+-          <div className="text-center">
+-            <h1 className="text-lg font-bold text-white">부과 관리</h1>
+-            <p className="text-xs text-gray-400">협회비·관리비</p>
++      <aside className="hidden md:flex md:w-64 md:flex-col bg-white border-r border-slate-200 shadow-sm">
++        {/* Brand */}
++        <div className="flex flex-col items-start justify-center h-[72px] px-5 border-b border-slate-100">
++          <div className="flex items-center gap-2.5">
++            <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center flex-shrink-0">
++              <Receipt className="w-4 h-4 text-white" />
++            </div>
++            <div>
++              <p className="text-[11px] font-medium text-slate-400 leading-none mb-0.5">강원도 개인소형화물협회</p>
++              <h1 className="text-sm font-bold text-slate-800 leading-none">부과 관리 시스템</h1>
++            </div>
+           </div>
+         </div>
+ 
+-        <nav className="flex-1 overflow-y-auto py-4 space-y-1 px-3">
++        {/* Nav */}
++        <nav className="flex-1 overflow-y-auto py-3 px-3 space-y-0.5">
+           {NAV_ITEMS.map((item) => {
+             const Icon = item.icon;
+             const isActive = location === item.href;
+@@ -89,31 +106,44 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
+               <a
+                 key={item.href}
+                 href={item.href}
+-                className={`flex items-center gap-3 px-4 py-2 rounded-lg transition-colors ${
++                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium group ${
+                   isActive
+-                    ? "bg-blue-600 text-white"
+-                    : "text-gray-300 hover:bg-gray-700 hover:text-white"
++                    ? "bg-indigo-50 text-indigo-700"
++                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                 }`}
+               >
+-                <Icon className="w-5 h-5" />
+-                <span className="text-sm font-medium">{item.label}</span>
++                <div
++                  className={`w-[3px] h-5 rounded-full mr-0.5 flex-shrink-0 transition-all ${
++                    isActive ? "bg-indigo-600" : "bg-transparent"
++                  }`}
++                />
++                <Icon
++                  className={`w-4 h-4 flex-shrink-0 transition-colors ${
++                    isActive ? "text-indigo-600" : "text-slate-400 group-hover:text-slate-600"
++                  }`}
++                />
++                <span className="flex-1 leading-none">{item.label}</span>
++                {isActive && <ChevronRight className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />}
+               </a>
+             );
+           })}
+         </nav>
+ 
+         {/* User Profile */}
+-        <div className="border-t border-gray-700 p-4">
+-          <div className="flex items-center justify-between">
+-            <div className="flex-1">
+-              <p className="text-sm font-medium text-white">{user?.name || "Administrator"}</p>
+-              <p className="text-xs text-gray-400">{user?.email || "admin@internal"}</p>
++        <div className="border-t border-slate-100 p-3">
++          <div className="flex items-center gap-2.5 px-2 py-2 rounded-lg">
++            <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0">
++              <UserCircle className="w-5 h-5 text-slate-400" />
++            </div>
++            <div className="flex-1 min-w-0">
++              <p className="text-sm font-medium text-slate-800 truncate">{user?.name || "Administrator"}</p>
++              <p className="text-xs text-slate-400 truncate">{user?.email || "admin@internal"}</p>
+             </div>
+             {user && (
+               <DropdownMenu>
+                 <DropdownMenuTrigger asChild>
+-                  <button className="p-1 hover:bg-gray-700 rounded-lg transition-colors">
+-                    <Settings className="w-5 h-5 text-gray-300" />
++                  <button className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors">
++                    <Settings className="w-4 h-4 text-slate-400" />
+                   </button>
+                 </DropdownMenuTrigger>
+                 <DropdownMenuContent align="end" className="w-48">
+@@ -131,28 +161,65 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
+       {/* Main Content */}
+       <div className="flex-1 flex flex-col overflow-hidden">
+         {/* Top Bar */}
+-        <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+-          <div className="flex-1" />
+-          {user && (
+-            <DropdownMenu>
+-              <DropdownMenuTrigger asChild>
+-                <button className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors">
+-                  <div className="text-right">
+-                    <p className="text-sm font-medium text-gray-900">{user.name || "Administrator"}</p>
+-                    <p className="text-xs text-gray-500">{user.email || "admin@internal"}</p>
+-                  </div>
+-                </button>
+-              </DropdownMenuTrigger>
+-              <DropdownMenuContent align="end" className="w-48">
+-                <DropdownMenuItem onClick={handleLogout} className="text-red-600 cursor-pointer">
+-                  <LogOut className="w-4 h-4 mr-2" />
+-                  로그아웃
+-                </DropdownMenuItem>
+-              </DropdownMenuContent>
+-            </DropdownMenu>
+-          )}
++        <header className="bg-white border-b border-slate-200 px-6 h-[72px] flex items-center justify-between flex-shrink-0">
++          <div className="flex items-center gap-2">
++            <span className="text-xs text-slate-400">강원도 개인소형화물협회</span>
++            <ChevronRight className="w-3 h-3 text-slate-300" />
++            <span className="text-sm font-semibold text-slate-800">{pageTitle}</span>
++          </div>
++          <div className="flex items-center gap-3">
++            {!user && (
++              <Button
++                variant="outline"
++                size="sm"
++                onClick={() => setShowSimpleLogin(!showSimpleLogin)}
++                className="text-xs"
++              >
++                로그인
++              </Button>
++            )}
++            {user && (
++              <DropdownMenu>
++                <DropdownMenuTrigger asChild>
++                  <button className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-50 transition-colors">
++                    <div className="w-7 h-7 rounded-full bg-indigo-100 flex items-center justify-center">
++                      <UserCircle className="w-4 h-4 text-indigo-600" />
++                    </div>
++                    <div className="text-right hidden sm:block">
++                      <p className="text-xs font-medium text-slate-900 leading-tight">{user.name || "Administrator"}</p>
++                      <p className="text-[11px] text-slate-400 leading-tight">{user.email || "admin@internal"}</p>
++                    </div>
++                  </button>
++                </DropdownMenuTrigger>
++                <DropdownMenuContent align="end" className="w-48">
++                  <DropdownMenuItem onClick={handleLogout} className="text-red-600 cursor-pointer">
++                    <LogOut className="w-4 h-4 mr-2" />
++                    로그아웃
++                  </DropdownMenuItem>
++                </DropdownMenuContent>
++              </DropdownMenu>
++            )}
++          </div>
+         </header>
+ 
++        {/* Simple Login Form */}
++        {showSimpleLogin && (
++          <div className="bg-amber-50 border-b border-amber-200 px-6 py-3">
++            <form onSubmit={handleSimpleLogin} className="flex items-center gap-3 max-w-sm">
++              <Input
++                type="password"
++                placeholder="관리자 비밀번호"
++                value={password}
++                onChange={(e) => setPassword(e.target.value)}
++                className="h-8 text-sm"
++              />
++              <Button type="submit" size="sm" disabled={isLoggingIn} className="h-8 text-xs whitespace-nowrap">
++                {isLoggingIn ? "로그인 중..." : "로그인"}
++              </Button>
++            </form>
++          </div>
++        )}
++
+         {/* Content */}
+         <main className="flex-1 overflow-auto">{children}</main>
+       </div>
+diff --git a/client/src/index.css b/client/src/index.css
+index 72b423d..a87d365 100644
+--- a/client/src/index.css
++++ b/client/src/index.css
+@@ -43,74 +43,74 @@
+ }
+ 
+ :root {
+-  --primary: var(--color-blue-700);
+-  --primary-foreground: var(--color-blue-50);
+-  --sidebar-primary: var(--color-blue-600);
+-  --sidebar-primary-foreground: var(--color-blue-50);
+-  --chart-1: var(--color-blue-300);
+-  --chart-2: var(--color-blue-500);
+-  --chart-3: var(--color-blue-600);
+-  --chart-4: var(--color-blue-700);
+-  --chart-5: var(--color-blue-800);
+-  --radius: 0.65rem;
+-  --background: oklch(1 0 0);
+-  --foreground: oklch(0.235 0.015 65);
++  --primary: oklch(0.38 0.08 255);
++  --primary-foreground: oklch(0.98 0.005 255);
++  --sidebar-primary: oklch(0.38 0.08 255);
++  --sidebar-primary-foreground: oklch(0.98 0.005 255);
++  --chart-1: oklch(0.65 0.12 255);
++  --chart-2: oklch(0.55 0.12 255);
++  --chart-3: oklch(0.45 0.10 255);
++  --chart-4: oklch(0.38 0.08 255);
++  --chart-5: oklch(0.30 0.07 255);
++  --radius: 0.75rem;
++  --background: oklch(0.98 0.002 240);
++  --foreground: oklch(0.20 0.012 250);
+   --card: oklch(1 0 0);
+-  --card-foreground: oklch(0.235 0.015 65);
++  --card-foreground: oklch(0.20 0.012 250);
+   --popover: oklch(1 0 0);
+-  --popover-foreground: oklch(0.235 0.015 65);
+-  --secondary: oklch(0.98 0.001 286.375);
+-  --secondary-foreground: oklch(0.4 0.015 65);
+-  --muted: oklch(0.967 0.001 286.375);
+-  --muted-foreground: oklch(0.552 0.016 285.938);
+-  --accent: oklch(0.967 0.001 286.375);
+-  --accent-foreground: oklch(0.141 0.005 285.823);
+-  --destructive: oklch(0.577 0.245 27.325);
++  --popover-foreground: oklch(0.20 0.012 250);
++  --secondary: oklch(0.96 0.003 250);
++  --secondary-foreground: oklch(0.35 0.012 250);
++  --muted: oklch(0.95 0.003 250);
++  --muted-foreground: oklch(0.52 0.015 250);
++  --accent: oklch(0.95 0.005 255);
++  --accent-foreground: oklch(0.25 0.012 255);
++  --destructive: oklch(0.58 0.22 27);
+   --destructive-foreground: oklch(0.985 0 0);
+-  --border: oklch(0.92 0.004 286.32);
+-  --input: oklch(0.92 0.004 286.32);
+-  --ring: oklch(0.623 0.214 259.815);
+-  --sidebar: oklch(0.985 0 0);
+-  --sidebar-foreground: oklch(0.235 0.015 65);
+-  --sidebar-accent: oklch(0.967 0.001 286.375);
+-  --sidebar-accent-foreground: oklch(0.141 0.005 285.823);
+-  --sidebar-border: oklch(0.92 0.004 286.32);
+-  --sidebar-ring: oklch(0.623 0.214 259.815);
++  --border: oklch(0.91 0.005 250);
++  --input: oklch(0.91 0.005 250);
++  --ring: oklch(0.50 0.14 255);
++  --sidebar: oklch(1 0 0);
++  --sidebar-foreground: oklch(0.20 0.012 250);
++  --sidebar-accent: oklch(0.96 0.006 255);
++  --sidebar-accent-foreground: oklch(0.30 0.10 255);
++  --sidebar-border: oklch(0.91 0.005 250);
++  --sidebar-ring: oklch(0.50 0.14 255);
+ }
+ 
+ .dark {
+-  --primary: var(--color-blue-700);
+-  --primary-foreground: var(--color-blue-50);
+-  --sidebar-primary: var(--color-blue-500);
+-  --sidebar-primary-foreground: var(--color-blue-50);
+-  --background: oklch(0.141 0.005 285.823);
+-  --foreground: oklch(0.85 0.005 65);
+-  --card: oklch(0.21 0.006 285.885);
+-  --card-foreground: oklch(0.85 0.005 65);
+-  --popover: oklch(0.21 0.006 285.885);
+-  --popover-foreground: oklch(0.85 0.005 65);
+-  --secondary: oklch(0.24 0.006 286.033);
+-  --secondary-foreground: oklch(0.7 0.005 65);
+-  --muted: oklch(0.274 0.006 286.033);
+-  --muted-foreground: oklch(0.705 0.015 286.067);
+-  --accent: oklch(0.274 0.006 286.033);
+-  --accent-foreground:  oklch(0.92 0.005 65);
+-  --destructive: oklch(0.704 0.191 22.216);
++  --primary: oklch(0.58 0.12 255);
++  --primary-foreground: oklch(0.98 0.005 255);
++  --sidebar-primary: oklch(0.58 0.12 255);
++  --sidebar-primary-foreground: oklch(0.98 0.005 255);
++  --background: oklch(0.14 0.008 250);
++  --foreground: oklch(0.88 0.005 250);
++  --card: oklch(0.20 0.008 250);
++  --card-foreground: oklch(0.88 0.005 250);
++  --popover: oklch(0.20 0.008 250);
++  --popover-foreground: oklch(0.88 0.005 250);
++  --secondary: oklch(0.24 0.008 250);
++  --secondary-foreground: oklch(0.70 0.005 250);
++  --muted: oklch(0.26 0.008 250);
++  --muted-foreground: oklch(0.60 0.015 250);
++  --accent: oklch(0.26 0.010 255);
++  --accent-foreground: oklch(0.92 0.005 250);
++  --destructive: oklch(0.68 0.19 22);
+   --destructive-foreground: oklch(0.985 0 0);
+   --border: oklch(1 0 0 / 10%);
+   --input: oklch(1 0 0 / 15%);
+-  --ring: oklch(0.488 0.243 264.376);
+-  --chart-1: var(--color-blue-300);
+-  --chart-2: var(--color-blue-500);
+-  --chart-3: var(--color-blue-600);
+-  --chart-4: var(--color-blue-700);
+-  --chart-5: var(--color-blue-800);
+-  --sidebar: oklch(0.21 0.006 285.885);
+-  --sidebar-foreground: oklch(0.85 0.005 65);
+-  --sidebar-accent: oklch(0.274 0.006 286.033);
+-  --sidebar-accent-foreground:  oklch(0.985 0 0);
++  --ring: oklch(0.55 0.16 255);
++  --chart-1: oklch(0.65 0.12 255);
++  --chart-2: oklch(0.55 0.12 255);
++  --chart-3: oklch(0.45 0.10 255);
++  --chart-4: oklch(0.38 0.08 255);
++  --chart-5: oklch(0.30 0.07 255);
++  --sidebar: oklch(0.20 0.008 250);
++  --sidebar-foreground: oklch(0.88 0.005 250);
++  --sidebar-accent: oklch(0.26 0.010 255);
++  --sidebar-accent-foreground: oklch(0.985 0 0);
+   --sidebar-border: oklch(1 0 0 / 10%);
+-  --sidebar-ring: oklch(0.488 0.243 264.376);
++  --sidebar-ring: oklch(0.55 0.16 255);
+ }
+ 
+ @layer base {
+@@ -134,24 +134,11 @@
+ }
+ 
+ @layer components {
+-  /**
+-   * Custom container utility that centers content and adds responsive padding.
+-   *
+-   * This overrides Tailwind's default container behavior to:
+-   * - Auto-center content (mx-auto)
+-   * - Add responsive horizontal padding
+-   * - Set max-width for large screens
+-   *
+-   * Usage: <div className="container">...</div>
+-   *
+-   * For custom widths, use max-w-* utilities directly:
+-   * <div className="max-w-6xl mx-auto px-4">...</div>
+-   */
+   .container {
+     width: 100%;
+     margin-left: auto;
+     margin-right: auto;
+-    padding-left: 1rem; /* 16px - mobile padding */
++    padding-left: 1rem;
+     padding-right: 1rem;
+   }
+ 
+@@ -162,16 +149,16 @@
+ 
+   @media (min-width: 640px) {
+     .container {
+-      padding-left: 1.5rem; /* 24px - tablet padding */
++      padding-left: 1.5rem;
+       padding-right: 1.5rem;
+     }
+   }
+ 
+   @media (min-width: 1024px) {
+     .container {
+-      padding-left: 2rem; /* 32px - desktop padding */
++      padding-left: 2rem;
+       padding-right: 2rem;
+-      max-width: 1280px; /* Standard content width */
++      max-width: 1280px;
+     }
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/client/src/pages/BillingApproval.tsx b/client/src/pages/BillingApproval.tsx
+index a65f535..db515da 100644
+--- a/client/src/pages/BillingApproval.tsx
++++ b/client/src/pages/BillingApproval.tsx
+@@ -1,12 +1,91 @@
+ import { useState } from "react";
+ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+ import { Button } from "@/components/ui/button";
+-import { Badge } from "@/components/ui/badge";
+ import { Input } from "@/components/ui/input";
+-import { Loader2, Eye } from "lucide-react";
++import { Badge } from "@/components/ui/badge";
++import { Eye, CalendarCheck, Users, TrendingUp } from "lucide-react";
+ import { BillingPreviewModal } from "@/components/BillingPreviewModal";
+ import { trpc } from "@/lib/trpc";
+ 
++function MonthSummaryCard({
++  month,
++  label,
++  count,
++  estimatedAmount,
++  variant,
++  onAction,
++  actionLabel,
++}: {
++  month: string;
++  label: string;
++  count: number;
++  estimatedAmount: number;
++  variant: "primary" | "secondary";
++  onAction: () => void;
++  actionLabel: string;
++}) {
++  const isPrimary = variant === "primary";
++  return (
++    <Card className={`bg-white border rounded-xl shadow-sm ${isPrimary ? "border-indigo-200" : "border-slate-200"}`}>
++      <CardHeader className={`pb-3 pt-4 px-5 border-b ${isPrimary ? "border-indigo-100 bg-indigo-50/40" : "border-slate-100"}`}>
++        <div className="flex items-center justify-between">
++          <CardTitle className="text-sm font-semibold text-slate-800 flex items-center gap-2">
++            <CalendarCheck className={`w-4 h-4 ${isPrimary ? "text-indigo-600" : "text-slate-400"}`} />
++            {label}
++          </CardTitle>
++          <span className={`text-xs font-mono font-medium px-2 py-0.5 rounded-full ${isPrimary ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-600"}`}>
++            {month}
++          </span>
++        </div>
++      </CardHeader>
++      <CardContent className="px-5 py-4">
++        <div className="grid grid-cols-3 gap-4 mb-4">
++          <div>
++            <div className="flex items-center gap-1.5 mb-1">
++              <Users className="w-3.5 h-3.5 text-slate-400" />
++              <span className="text-xs text-slate-500 font-medium">부과 대상</span>
++            </div>
++            <div className={`text-2xl font-bold tabular-nums ${isPrimary ? "text-indigo-700" : "text-slate-700"}`}>
++              {count}
++            </div>
++            <div className="text-xs text-slate-400 mt-0.5">건</div>
++          </div>
++          <div>
++            <div className="flex items-center gap-1.5 mb-1">
++              <TrendingUp className="w-3.5 h-3.5 text-slate-400" />
++              <span className="text-xs text-slate-500 font-medium">예상 부과액</span>
++            </div>
++            <div className={`text-2xl font-bold tabular-nums ${isPrimary ? "text-indigo-700" : "text-slate-700"}`}>
++              {estimatedAmount.toLocaleString()}
++            </div>
++            <div className="text-xs text-slate-400 mt-0.5">원</div>
++          </div>
++          <div className="flex flex-col justify-end">
++            <Button
++              onClick={onAction}
++              size="sm"
++              className={`gap-1.5 ${isPrimary ? "bg-indigo-600 hover:bg-indigo-700" : "bg-slate-700 hover:bg-slate-800"}`}
++            >
++              <Eye className="w-3.5 h-3.5" />
++              {actionLabel}
++            </Button>
++          </div>
++        </div>
++      </CardContent>
++    </Card>
++  );
++}
++
++function TableSkeleton() {
++  return (
++    <div className="space-y-2 py-2">
++      {[...Array(4)].map((_, i) => (
++        <div key={i} className="h-16 bg-slate-100 rounded-lg animate-pulse" />
++      ))}
++    </div>
++  );
++}
++
+ export default function BillingApproval() {
+   const [selectedMonth, setSelectedMonth] = useState<string>("");
+   const [previewOpen, setPreviewOpen] = useState(false);
+@@ -20,7 +99,6 @@ export default function BillingApproval() {
+     setPreviewOpen(true);
+   };
+ 
+-  // 현재 월과 다음 월 계산
+   const now = new Date();
+   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+   const nextMonth = `${now.getFullYear()}-${String(now.getMonth() + 2).padStart(2, "0")}`;
+@@ -28,146 +106,101 @@ export default function BillingApproval() {
+   const thisMonthCandidates = candidates.filter((c: any) => c.billingStartMonth === currentMonth);
+   const nextMonthCandidates = candidates.filter((c: any) => c.billingStartMonth === nextMonth);
+ 
+-  if (isLoading) {
+-    return (
+-      <div className="flex items-center justify-center h-screen">
+-        <Loader2 className="animate-spin w-8 h-8 text-muted-foreground" />
+-      </div>
+-    );
+-  }
+-
+   return (
+-    <div className="space-y-6 p-8">
+-      <div className="space-y-2">
+-        <h1 className="text-3xl font-bold text-gray-900">이번 달 부과 예정</h1>
+-        <p className="text-gray-600">부과 대상자 현황 및 부과 반영 관리</p>
++    <div className="p-6 space-y-5 max-w-7xl">
++      {/* Header */}
++      <div>
++        <h1 className="text-xl font-bold text-slate-900">이번 달 부과 예정</h1>
++        <p className="text-sm text-slate-500 mt-0.5">부과 대상자 현황 및 부과 반영 관리</p>
+       </div>
+ 
+-      {/* 부과 월 선택 */}
+-      <Card className="border-2 border-gray-200">
+-        <CardHeader>
+-          <CardTitle className="text-base">부과 월 선택</CardTitle>
+-        </CardHeader>
+-        <CardContent>
+-          <div className="space-y-4">
+-            <div className="space-y-2">
+-              <label className="text-sm font-medium text-gray-700">부과 월 (YYYY-MM)</label>
+-              <div className="flex gap-2">
+-                <Input
+-                  type="month"
+-                  value={selectedMonth}
+-                  onChange={(e) => setSelectedMonth(e.target.value)}
+-                  placeholder="부과 월을 선택하세요"
+-                />
+-                <Button
+-                  onClick={() => handlePreview(selectedMonth)}
+-                  disabled={!selectedMonth}
+-                  className="bg-blue-600 hover:bg-blue-700"
+-                >
+-                  <Eye className="w-4 h-4 mr-2" />
+-                  미리보기
+-                </Button>
+-              </div>
+-            </div>
+-          </div>
+-        </CardContent>
+-      </Card>
+-
+-      {/* 이번 달 부과 예정 */}
+-      <Card className="border-2 border-blue-200 bg-blue-50">
+-        <CardHeader>
+-          <CardTitle className="text-base text-blue-900">이번 달 부과 예정 ({currentMonth})</CardTitle>
++      {/* Month Selector */}
++      <Card className="bg-white border border-slate-200 rounded-xl shadow-sm">
++        <CardHeader className="pb-3 pt-4 px-5 border-b border-slate-100">
++          <CardTitle className="text-sm font-semibold text-slate-700">부과 월 직접 선택</CardTitle>
+         </CardHeader>
+-        <CardContent>
+-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+-            <div className="bg-white rounded-lg p-4 border border-blue-200">
+-              <p className="text-sm text-gray-600">부과 대상</p>
+-              <p className="text-3xl font-bold text-blue-600 mt-2">{thisMonthCandidates.length}</p>
+-              <p className="text-xs text-gray-500 mt-1">건</p>
+-            </div>
+-            <div className="bg-white rounded-lg p-4 border border-blue-200">
+-              <p className="text-sm text-gray-600">예상 부과액</p>
+-              <p className="text-3xl font-bold text-blue-600 mt-2">
+-                {(thisMonthCandidates.length * 15000).toLocaleString()}
+-              </p>
+-              <p className="text-xs text-gray-500 mt-1">원</p>
+-            </div>
+-            <div className="bg-white rounded-lg p-4 border border-blue-200 flex flex-col justify-between">
+-              <p className="text-sm text-gray-600">상태</p>
+-              <Button
+-                onClick={() => handlePreview(currentMonth)}
+-                className="mt-4 bg-blue-600 hover:bg-blue-700"
+-              >
+-                <Eye className="w-4 h-4 mr-2" />
+-                부과 반영
+-              </Button>
++        <CardContent className="px-5 py-4">
++          <div className="flex items-end gap-3 max-w-sm">
++            <div className="flex-1">
++              <label className="text-xs font-medium text-slate-600 block mb-1.5">부과 월 (YYYY-MM)</label>
++              <Input
++                type="month"
++                value={selectedMonth}
++                onChange={(e) => setSelectedMonth(e.target.value)}
++                className="h-9 text-sm"
++              />
+             </div>
++            <Button
++              onClick={() => handlePreview(selectedMonth)}
++              disabled={!selectedMonth}
++              size="sm"
++              className="gap-1.5 bg-indigo-600 hover:bg-indigo-700 h-9"
++            >
++              <Eye className="w-3.5 h-3.5" />
++              미리보기
++            </Button>
+           </div>
+         </CardContent>
+       </Card>
+ 
+-      {/* 다음 달 부과 예정 */}
+-      <Card className="border-2 border-green-200 bg-green-50">
+-        <CardHeader>
+-          <CardTitle className="text-base text-green-900">다음 달 부과 예정 ({nextMonth})</CardTitle>
+-        </CardHeader>
+-        <CardContent>
+-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+-            <div className="bg-white rounded-lg p-4 border border-green-200">
+-              <p className="text-sm text-gray-600">부과 대상</p>
+-              <p className="text-3xl font-bold text-green-600 mt-2">{nextMonthCandidates.length}</p>
+-              <p className="text-xs text-gray-500 mt-1">건</p>
+-            </div>
+-            <div className="bg-white rounded-lg p-4 border border-green-200">
+-              <p className="text-sm text-gray-600">예상 부과액</p>
+-              <p className="text-3xl font-bold text-green-600 mt-2">
+-                {(nextMonthCandidates.length * 15000).toLocaleString()}
+-              </p>
+-              <p className="text-xs text-gray-500 mt-1">원</p>
+-            </div>
+-            <div className="bg-white rounded-lg p-4 border border-green-200 flex flex-col justify-between">
+-              <p className="text-sm text-gray-600">상태</p>
+-              <Button
+-                onClick={() => handlePreview(nextMonth)}
+-                variant="outline"
+-                className="mt-4"
+-              >
+-                <Eye className="w-4 h-4 mr-2" />
+-                미리보기
+-              </Button>
+-            </div>
+-          </div>
+-        </CardContent>
+-      </Card>
++      {/* Month Summary Cards */}
++      {isLoading ? (
++        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
++          {[0, 1].map((i) => (
++            <Card key={i} className="bg-white border border-slate-200 rounded-xl shadow-sm">
++              <CardContent className="px-5 py-4">
++                <TableSkeleton />
++              </CardContent>
++            </Card>
++          ))}
++        </div>
++      ) : (
++        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
++          <MonthSummaryCard
++            month={currentMonth}
++            label="이번 달 부과 예정"
++            count={thisMonthCandidates.length}
++            estimatedAmount={thisMonthCandidates.length * 15000}
++            variant="primary"
++            onAction={() => handlePreview(currentMonth)}
++            actionLabel="부과 반영"
++          />
++          <MonthSummaryCard
++            month={nextMonth}
++            label="다음 달 부과 예정"
++            count={nextMonthCandidates.length}
++            estimatedAmount={nextMonthCandidates.length * 15000}
++            variant="secondary"
++            onAction={() => handlePreview(nextMonth)}
++            actionLabel="미리보기"
++          />
++        </div>
++      )}
+ 
+-      {/* 부과 반영 이력 */}
+-      <Card className="border-2 border-gray-200">
+-        <CardHeader>
+-          <CardTitle className="text-base">최근 부과 반영 이력</CardTitle>
++      {/* Recent billing history */}
++      <Card className="bg-white border border-slate-200 rounded-xl shadow-sm">
++        <CardHeader className="pb-3 pt-4 px-5 border-b border-slate-100">
++          <CardTitle className="text-sm font-semibold text-slate-700">최근 부과 반영 이력</CardTitle>
+         </CardHeader>
+-        <CardContent>
+-          <div className="space-y-3">
+-            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+-              <div>
+-                <p className="text-sm font-medium text-gray-900">2026년 6월 부과</p>
+-                <p className="text-xs text-gray-500 mt-1">2026-06-01 10:30:00</p>
+-              </div>
+-              <div className="flex items-center gap-2">
+-                <Badge className="bg-green-100 text-green-800">완료</Badge>
+-                <span className="text-sm font-medium text-gray-900">145건</span>
++        <CardContent className="px-5 py-3">
++          <div className="space-y-1">
++            {[
++              { month: "2026년 6월 부과", date: "2026-06-01 10:30", count: 145 },
++              { month: "2026년 5월 부과", date: "2026-05-01 09:15", count: 142 },
++            ].map((item) => (
++              <div key={item.month} className="flex items-center justify-between py-3 border-b border-slate-50 last:border-0">
++                <div>
++                  <p className="text-sm font-medium text-slate-800">{item.month}</p>
++                  <p className="text-xs text-slate-400 mt-0.5 font-mono">{item.date}</p>
++                </div>
++                <div className="flex items-center gap-3">
++                  <span className="inline-flex items-center text-xs font-medium rounded-full px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200">
++                    완료
++                  </span>
++                  <span className="text-sm font-semibold text-slate-700 tabular-nums">{item.count}건</span>
++                </div>
+               </div>
+-            </div>
+-
+-            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+-              <div>
+-                <p className="text-sm font-medium text-gray-900">2026년 5월 부과</p>
+-                <p className="text-xs text-gray-500 mt-1">2026-05-01 09:15:00</p>
+-              </div>
+-              <div className="flex items-center gap-2">
+-                <Badge className="bg-green-100 text-green-800">완료</Badge>
+-                <span className="text-sm font-medium text-gray-900">142건</span>
+-              </div>
+-            </div>
++            ))}
+           </div>
+         </CardContent>
+       </Card>
+diff --git a/client/src/pages/BillingCandidates.tsx b/client/src/pages/BillingCandidates.tsx
+index 325ded6..f582ca1 100644
+--- a/client/src/pages/BillingCandidates.tsx
++++ b/client/src/pages/BillingCandidates.tsx
+@@ -5,17 +5,23 @@ import { Input } from "@/components/ui/input";
+ import { Badge } from "@/components/ui/badge";
+ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+-import { Loader2, Download, Search, Filter, AlertCircle } from "lucide-react";
++import { Download, Search, Filter, Users, FileSearch } from "lucide-react";
+ import { trpc } from "@/lib/trpc";
+ import { CandidateDetailModal } from "@/components/CandidateDetailModal";
+ 
+-const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
+-  대기: { bg: "bg-yellow-100", text: "text-yellow-800" },
+-  부과예정: { bg: "bg-blue-100", text: "text-blue-800" },
+-  부과반영완료: { bg: "bg-green-100", text: "text-green-800" },
+-  확인필요: { bg: "bg-red-100", text: "text-red-800" },
+-  보류: { bg: "bg-gray-100", text: "text-gray-800" },
+-  제외: { bg: "bg-gray-200", text: "text-gray-700" },
++const STATUS_STYLE: Record<string, string> = {
++  대기: "bg-amber-50 text-amber-700 border border-amber-200",
++  부과예정: "bg-sky-50 text-sky-700 border border-sky-200",
++  부과반영완료: "bg-emerald-50 text-emerald-700 border border-emerald-200",
++  확인필요: "bg-red-50 text-red-700 border border-red-200",
++  보류: "bg-slate-100 text-slate-600 border border-slate-200",
++  제외: "bg-gray-50 text-gray-500 border border-gray-200",
++};
++
++const BILLING_TYPE_STYLE: Record<string, string> = {
++  협회비: "bg-emerald-50 text-emerald-700 border border-emerald-200",
++  관리비: "bg-indigo-50 text-indigo-700 border border-indigo-200",
++  확인필요: "bg-amber-50 text-amber-700 border border-amber-200",
+ };
+ 
+ function getCalculationReason(
+@@ -25,24 +31,25 @@ function getCalculationReason(
+   billingType?: string
+ ): string {
+   if (billingType === "확인필요") {
+-    if (memberType === "개인회원" && !joinDate) {
+-      return "joinDate 누락";
+-    }
+-    if (memberType === "택배회원" && !certificateDate) {
+-      return "certificateDate 누락";
+-    }
++    if (memberType === "개인회원" && !joinDate) return "joinDate 누락";
++    if (memberType === "택배회원" && !certificateDate) return "certificateDate 누락";
+     return "정보 부족";
+   }
+-
+-  if (memberType === "개인회원" && billingType === "협회비") {
+-    return "협회비: joinDate 기준";
+-  }
+-  if (memberType === "택배회원" && billingType === "관리비") {
+-    return "관리비: certificateDate 기준";
+-  }
++  if (memberType === "개인회원" && billingType === "협회비") return "협회비: joinDate 기준";
++  if (memberType === "택배회원" && billingType === "관리비") return "관리비: certificateDate 기준";
+   return "";
+ }
+ 
++function TableSkeleton() {
++  return (
++    <div className="space-y-2 py-2">
++      {[...Array(7)].map((_, i) => (
++        <div key={i} className="h-12 bg-slate-100 rounded-lg animate-pulse" />
++      ))}
++    </div>
++  );
++}
++
+ export default function BillingCandidates() {
+   const [filters, setFilters] = useState({
+     region: "all",
+@@ -50,7 +57,6 @@ export default function BillingCandidates() {
+     status: "all",
+     billingStartMonth: "",
+   });
+-
+   const [searchText, setSearchText] = useState("");
+   const [selectedCandidateId, setSelectedCandidateId] = useState<number | null>(null);
+ 
+@@ -75,13 +81,8 @@ export default function BillingCandidates() {
+     const csv = [
+       ["차량번호", "성명", "지역", "구분", "부과항목", "부과시작월", "상태", "계산 근거"],
+       ...filteredCandidates.map((c: any) => [
+-        c.vehicleNo,
+-        c.name,
+-        c.region || "",
+-        c.memberType,
+-        c.billingType,
+-        c.billingStartMonth || "",
+-        c.status,
++        c.vehicleNo, c.name, c.region || "", c.memberType, c.billingType,
++        c.billingStartMonth || "", c.status,
+         getCalculationReason(c.memberType, c.joinDate, c.certificateDate, c.billingType),
+       ]),
+     ]
+@@ -95,50 +96,48 @@ export default function BillingCandidates() {
+     link.click();
+   };
+ 
+-  if (isLoading) {
+-    return (
+-      <div className="flex items-center justify-center h-screen">
+-        <Loader2 className="animate-spin w-8 h-8 text-muted-foreground" />
+-      </div>
+-    );
+-  }
+-
+   return (
+-    <div className="space-y-6 p-8">
+-      <div className="space-y-2">
+-        <h1 className="text-3xl font-bold text-gray-900">다음 달 부과 대상</h1>
+-        <p className="text-gray-600">회원 정보 및 부과 대상 관리</p>
++    <div className="p-6 space-y-5 max-w-7xl">
++      {/* Header */}
++      <div className="flex items-center justify-between">
++        <div>
++          <h1 className="text-xl font-bold text-slate-900">다음 달 부과 대상</h1>
++          <p className="text-sm text-slate-500 mt-0.5">신규 등록 회원 부과 항목 확인 및 관리</p>
++        </div>
++        <Button onClick={handleDownloadExcel} variant="outline" size="sm" className="gap-1.5 text-emerald-700 border-emerald-200 hover:bg-emerald-50">
++          <Download className="w-3.5 h-3.5" />
++          엑셀 다운로드
++        </Button>
+       </div>
+ 
+-      {/* 필터 및 검색 */}
+-      <Card className="bg-white border border-gray-200">
+-        <CardHeader>
+-          <CardTitle className="text-base flex items-center gap-2">
+-            <Filter className="w-4 h-4" />
+-            필터 및 검색
++      {/* Filter Card */}
++      <Card className="bg-white border border-slate-200 rounded-xl shadow-sm">
++        <CardHeader className="pb-3 pt-4 px-5 border-b border-slate-100">
++          <CardTitle className="text-sm font-semibold text-slate-700 flex items-center gap-2">
++            <Filter className="w-4 h-4 text-slate-400" />
++            검색 및 필터
+           </CardTitle>
+         </CardHeader>
+-        <CardContent className="space-y-4">
+-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+-            <div>
+-              <label className="text-sm font-medium text-gray-700">검색 (차량번호/성명)</label>
+-              <div className="flex gap-2 mt-1">
++        <CardContent className="px-5 py-4">
++          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
++            {/* Search */}
++            <div className="md:col-span-1">
++              <label className="text-xs font-medium text-slate-600 block mb-1.5">차량번호 / 성명</label>
++              <div className="relative">
++                <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-slate-400" />
+                 <Input
+                   placeholder="검색..."
+                   value={searchText}
+                   onChange={(e) => setSearchText(e.target.value)}
+-                  className="flex-1"
++                  className="pl-8 h-9 text-sm"
+                 />
+-                <Button variant="outline" size="icon">
+-                  <Search className="w-4 h-4" />
+-                </Button>
+               </div>
+             </div>
+ 
+             <div>
+-              <label className="text-sm font-medium text-gray-700">지역</label>
++              <label className="text-xs font-medium text-slate-600 block mb-1.5">지역</label>
+               <Select value={filters.region} onValueChange={(v) => setFilters({ ...filters, region: v })}>
+-                <SelectTrigger className="mt-1">
++                <SelectTrigger className="h-9 text-sm">
+                   <SelectValue placeholder="전체" />
+                 </SelectTrigger>
+                 <SelectContent>
+@@ -151,9 +150,9 @@ export default function BillingCandidates() {
+             </div>
+ 
+             <div>
+-              <label className="text-sm font-medium text-gray-700">구분</label>
++              <label className="text-xs font-medium text-slate-600 block mb-1.5">구분</label>
+               <Select value={filters.memberType} onValueChange={(v) => setFilters({ ...filters, memberType: v })}>
+-                <SelectTrigger className="mt-1">
++                <SelectTrigger className="h-9 text-sm">
+                   <SelectValue placeholder="전체" />
+                 </SelectTrigger>
+                 <SelectContent>
+@@ -165,9 +164,9 @@ export default function BillingCandidates() {
+             </div>
+ 
+             <div>
+-              <label className="text-sm font-medium text-gray-700">상태</label>
++              <label className="text-xs font-medium text-slate-600 block mb-1.5">상태</label>
+               <Select value={filters.status} onValueChange={(v) => setFilters({ ...filters, status: v })}>
+-                <SelectTrigger className="mt-1">
++                <SelectTrigger className="h-9 text-sm">
+                   <SelectValue placeholder="전체" />
+                 </SelectTrigger>
+                 <SelectContent>
+@@ -183,98 +182,108 @@ export default function BillingCandidates() {
+             </div>
+ 
+             <div>
+-              <label className="text-sm font-medium text-gray-700">부과시작월</label>
++              <label className="text-xs font-medium text-slate-600 block mb-1.5">부과시작월</label>
+               <Input
+                 type="month"
+                 value={filters.billingStartMonth}
+                 onChange={(e) => setFilters({ ...filters, billingStartMonth: e.target.value })}
+-                className="mt-1"
++                className="h-9 text-sm"
+               />
+             </div>
+           </div>
+-
+-          <div className="flex justify-end">
+-            <Button onClick={handleDownloadExcel} variant="outline" className="gap-2">
+-              <Download className="w-4 h-4" />
+-              엑셀 다운로드
+-            </Button>
+-          </div>
+         </CardContent>
+       </Card>
+ 
+-      {/* 목록 */}
+-      <Card className="bg-white border border-gray-200">
+-        <CardHeader>
+-          <CardTitle className="text-base">
+-            부과 대상자 목록 ({filteredCandidates.length}명)
+-          </CardTitle>
++      {/* Table Card */}
++      <Card className="bg-white border border-slate-200 rounded-xl shadow-sm">
++        <CardHeader className="pb-3 pt-4 px-5 border-b border-slate-100">
++          <div className="flex items-center justify-between">
++            <CardTitle className="text-sm font-semibold text-slate-700 flex items-center gap-2">
++              <Users className="w-4 h-4 text-slate-400" />
++              부과 대상자 목록
++            </CardTitle>
++            {!isLoading && (
++              <span className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-full px-2.5 py-1 font-medium">
++                {filteredCandidates.length.toLocaleString()}명
++              </span>
++            )}
++          </div>
+         </CardHeader>
+-        <CardContent>
+-          <div className="overflow-x-auto">
+-            <Table>
+-              <TableHeader className="bg-gray-50">
+-                <TableRow>
+-                  <TableHead className="text-gray-700 font-semibold">차량번호</TableHead>
+-                  <TableHead className="text-gray-700 font-semibold">성명</TableHead>
+-                  <TableHead className="text-gray-700 font-semibold">구분</TableHead>
+-                  <TableHead className="text-gray-700 font-semibold">부과항목</TableHead>
+-                  <TableHead className="text-gray-700 font-semibold">계산 근거</TableHead>
+-                  <TableHead className="text-gray-700 font-semibold">부과시작월</TableHead>
+-                  <TableHead className="text-gray-700 font-semibold">상태</TableHead>
+-                  <TableHead className="text-gray-700 font-semibold">작업</TableHead>
+-                </TableRow>
+-              </TableHeader>
+-              <TableBody>
+-                {filteredCandidates.length === 0 ? (
+-                  <TableRow>
+-                    <TableCell colSpan={8} className="text-center py-8 text-gray-500">
+-                      부과 대상이 없습니다.
+-                    </TableCell>
++        <CardContent className="p-0">
++          {isLoading ? (
++            <div className="px-5 py-3">
++              <TableSkeleton />
++            </div>
++          ) : (
++            <div className="overflow-x-auto">
++              <Table>
++                <TableHeader>
++                  <TableRow className="bg-slate-50 hover:bg-slate-50 border-b border-slate-100">
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide pl-5">차량번호</TableHead>
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">성명</TableHead>
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">구분</TableHead>
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">부과항목</TableHead>
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">계산 근거</TableHead>
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">부과시작월</TableHead>
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">상태</TableHead>
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide pr-5">상세</TableHead>
+                   </TableRow>
+-                ) : (
+-                  filteredCandidates.map((candidate: any) => (
+-                    <TableRow key={candidate.id} className="hover:bg-gray-50 border-b border-gray-200">
+-                      <TableCell className="text-sm font-medium text-gray-900">{candidate.vehicleNo}</TableCell>
+-                      <TableCell className="text-sm text-gray-900">{candidate.name}</TableCell>
+-                      <TableCell className="text-sm text-gray-900">{candidate.memberType}</TableCell>
+-                      <TableCell className="text-sm">
+-                        <Badge
+-                          className={
+-                            candidate.billingType === "협회비"
+-                              ? "bg-green-100 text-green-800"
+-                              : candidate.billingType === "관리비"
+-                                ? "bg-blue-100 text-blue-800"
+-                                : "bg-yellow-100 text-yellow-800"
+-                          }
+-                        >
+-                          {candidate.billingType}
+-                        </Badge>
+-                      </TableCell>
+-                      <TableCell className="text-xs text-gray-600">
+-                        {getCalculationReason(
+-                          candidate.memberType,
+-                          candidate.joinDate,
+-                          candidate.certificateDate,
+-                          candidate.billingType
+-                        )}
+-                      </TableCell>
+-                      <TableCell className="text-sm text-gray-900">{candidate.billingStartMonth || "-"}</TableCell>
+-                      <TableCell className="text-sm">
+-                        <Badge className={`${STATUS_COLORS[candidate.status]?.bg} ${STATUS_COLORS[candidate.status]?.text}`}>
+-                          {candidate.status}
+-                        </Badge>
+-                      </TableCell>
+-                      <TableCell className="text-sm">
+-                        <Button variant="outline" size="sm" onClick={() => setSelectedCandidateId(candidate.id)}>
+-                          상세
+-                        </Button>
++                </TableHeader>
++                <TableBody>
++                  {filteredCandidates.length === 0 ? (
++                    <TableRow>
++                      <TableCell colSpan={8} className="py-16 text-center">
++                        <FileSearch className="w-10 h-10 text-slate-200 mx-auto mb-3" />
++                        <p className="text-sm font-medium text-slate-400">부과 대상이 없습니다</p>
++                        <p className="text-xs text-slate-300 mt-1">필터 조건을 변경하거나 검색어를 수정해 보세요</p>
+                       </TableCell>
+                     </TableRow>
+-                  ))
+-                )}
+-              </TableBody>
+-            </Table>
+-          </div>
++                  ) : (
++                    filteredCandidates.map((candidate: any) => (
++                      <TableRow key={candidate.id} className="hover:bg-slate-50 border-b border-slate-50">
++                        <TableCell className="text-sm font-semibold text-slate-900 pl-5 py-3">
++                          {candidate.vehicleNo}
++                        </TableCell>
++                        <TableCell className="text-sm text-slate-800 py-3">{candidate.name}</TableCell>
++                        <TableCell className="text-sm text-slate-600 py-3">{candidate.memberType}</TableCell>
++                        <TableCell className="py-3">
++                          <span className={`inline-flex items-center text-xs font-medium rounded-full px-2 py-0.5 ${BILLING_TYPE_STYLE[candidate.billingType] ?? "bg-slate-100 text-slate-600"}`}>
++                            {candidate.billingType}
++                          </span>
++                        </TableCell>
++                        <TableCell className="text-xs text-slate-500 py-3 max-w-[160px] truncate">
++                          {getCalculationReason(
++                            candidate.memberType,
++                            candidate.joinDate,
++                            candidate.certificateDate,
++                            candidate.billingType
++                          )}
++                        </TableCell>
++                        <TableCell className="text-sm text-slate-700 py-3 font-mono">
++                          {candidate.billingStartMonth || <span className="text-slate-300">-</span>}
++                        </TableCell>
++                        <TableCell className="py-3">
++                          <span className={`inline-flex items-center text-xs font-medium rounded-full px-2 py-0.5 ${STATUS_STYLE[candidate.status] ?? "bg-slate-100 text-slate-600"}`}>
++                            {candidate.status}
++                          </span>
++                        </TableCell>
++                        <TableCell className="py-3 pr-5">
++                          <Button
++                            variant="ghost"
++                            size="sm"
++                            onClick={() => setSelectedCandidateId(candidate.id)}
++                            className="h-7 px-3 text-xs text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50"
++                          >
++                            상세 보기
++                          </Button>
++                        </TableCell>
++                      </TableRow>
++                    ))
++                  )}
++                </TableBody>
++              </Table>
++            </div>
++          )}
+         </CardContent>
+       </Card>
+ 
+diff --git a/client/src/pages/BillingRecords.tsx b/client/src/pages/BillingRecords.tsx
+index 4f83bfb..06b5e1f 100644
+--- a/client/src/pages/BillingRecords.tsx
++++ b/client/src/pages/BillingRecords.tsx
+@@ -1,27 +1,78 @@
+ import { useState } from "react";
+ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+ import { Button } from "@/components/ui/button";
+-import { Badge } from "@/components/ui/badge";
+ import { Input } from "@/components/ui/input";
+ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+-import { Loader2, Download, Search } from "lucide-react";
++import { Download, Search, Receipt, TrendingUp, TrendingDown, FileSearch } from "lucide-react";
+ import { trpc } from "@/lib/trpc";
+ 
++function SummaryCard({
++  title,
++  value,
++  unit = "원",
++  icon: Icon,
++  iconBg,
++  iconColor,
++  valueColor,
++}: {
++  title: string;
++  value: number;
++  unit?: string;
++  icon: React.ElementType;
++  iconBg: string;
++  iconColor: string;
++  valueColor: string;
++}) {
++  return (
++    <Card className="bg-white border border-slate-200 rounded-xl shadow-sm">
++      <CardContent className="p-5">
++        <div className="flex items-start justify-between mb-3">
++          <div className={`w-10 h-10 rounded-xl ${iconBg} flex items-center justify-center`}>
++            <Icon className={`w-5 h-5 ${iconColor}`} />
++          </div>
++        </div>
++        <div className={`text-2xl font-bold tabular-nums ${valueColor}`}>
++          {value.toLocaleString()}
++        </div>
++        <div className="text-xs text-slate-500 mt-1 font-medium flex items-center gap-1">
++          {title} <span className="text-slate-400">{unit}</span>
++        </div>
++      </CardContent>
++    </Card>
++  );
++}
++
++function TableSkeleton() {
++  return (
++    <div className="space-y-2 py-2">
++      {[...Array(6)].map((_, i) => (
++        <div key={i} className="h-12 bg-slate-100 rounded-lg animate-pulse" />
++      ))}
++    </div>
++  );
++}
++
+ export default function BillingRecords() {
+   const [searchText, setSearchText] = useState("");
+ 
+   const { data: records = [], isLoading } = trpc.billing.listBillingRecords.useQuery({});
+ 
++  const filtered = searchText
++    ? records.filter((r: any) => r.billingMonth?.includes(searchText))
++    : records;
++
++  const totalAmount = records.reduce((sum: number, r: any) => sum + (r.amount || 0), 0);
++  const totalPaid = records.reduce((sum: number, r: any) => sum + (r.paidAmount || 0), 0);
++  const totalUnpaid = totalAmount - totalPaid;
++
+   const handleExportExcel = () => {
+-    const headers = ["부과월", "부과액", "납부여부", "납부일자", "납부액"];
++    const headers = ["부과월", "부과액", "납부여부", "납부일자", "납부액", "미수금"];
+     const rows = records.map((r: any) => [
+-      r.billingMonth || "",
+-      r.amount || 0,
++      r.billingMonth || "", r.amount || 0,
+       r.isPaid ? "완납" : "미납",
+-      r.paidDate || "",
+-      r.paidAmount || 0,
++      r.paidDate || "", r.paidAmount || 0,
++      (r.amount || 0) - (r.paidAmount || 0),
+     ]);
+-
+     const csv = [headers, ...rows].map((row: any) => row.map((cell: any) => `"${cell}"`).join(",")).join("\n");
+     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+     const link = document.createElement("a");
+@@ -30,123 +81,143 @@ export default function BillingRecords() {
+     link.click();
+   };
+ 
+-  const totalAmount = records.reduce((sum: number, r: any) => sum + (r.amount || 0), 0);
+-  const totalPaid = records.reduce((sum: number, r: any) => sum + (r.paidAmount || 0), 0);
+-  const totalUnpaid = totalAmount - totalPaid;
+-
+-  if (isLoading) {
+-    return (
+-      <div className="flex items-center justify-center h-screen">
+-        <Loader2 className="animate-spin w-8 h-8 text-muted-foreground" />
+-      </div>
+-    );
+-  }
+-
+   return (
+-    <div className="space-y-6 p-8">
+-      <div className="space-y-2">
+-        <h1 className="text-3xl font-bold text-gray-900">납부현황</h1>
+-        <p className="text-gray-600">월별 부과 및 납부 현황 관리</p>
++    <div className="p-6 space-y-5 max-w-7xl">
++      {/* Header */}
++      <div className="flex items-center justify-between">
++        <div>
++          <h1 className="text-xl font-bold text-slate-900">납부현황</h1>
++          <p className="text-sm text-slate-500 mt-0.5">월별 부과 및 납부 현황 관리</p>
++        </div>
++        <Button onClick={handleExportExcel} variant="outline" size="sm" className="gap-1.5 text-emerald-700 border-emerald-200 hover:bg-emerald-50">
++          <Download className="w-3.5 h-3.5" />
++          엑셀 다운로드
++        </Button>
+       </div>
+ 
+-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+-        <Card className="border-2 border-green-200 bg-green-50">
+-          <CardHeader className="pb-3">
+-            <CardTitle className="text-sm font-medium text-gray-700">총 부과액</CardTitle>
+-          </CardHeader>
+-          <CardContent>
+-            <div className="text-3xl font-bold text-green-900">{totalAmount.toLocaleString()}</div>
+-            <p className="text-xs text-green-700 mt-2">원</p>
+-          </CardContent>
+-        </Card>
+-
+-        <Card className="border-2 border-blue-200 bg-blue-50">
+-          <CardHeader className="pb-3">
+-            <CardTitle className="text-sm font-medium text-gray-700">납부액</CardTitle>
+-          </CardHeader>
+-          <CardContent>
+-            <div className="text-3xl font-bold text-blue-900">{totalPaid.toLocaleString()}</div>
+-            <p className="text-xs text-blue-700 mt-2">원</p>
+-          </CardContent>
+-        </Card>
+-
+-        <Card className="border-2 border-red-200 bg-red-50">
+-          <CardHeader className="pb-3">
+-            <CardTitle className="text-sm font-medium text-gray-700">미수금</CardTitle>
+-          </CardHeader>
+-          <CardContent>
+-            <div className="text-3xl font-bold text-red-900">{totalUnpaid.toLocaleString()}</div>
+-            <p className="text-xs text-red-700 mt-2">원</p>
+-          </CardContent>
+-        </Card>
++      {/* Summary Cards */}
++      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
++        <SummaryCard
++          title="총 부과액"
++          value={totalAmount}
++          icon={Receipt}
++          iconBg="bg-slate-100"
++          iconColor="text-slate-600"
++          valueColor="text-slate-900"
++        />
++        <SummaryCard
++          title="납부액"
++          value={totalPaid}
++          icon={TrendingUp}
++          iconBg="bg-emerald-50"
++          iconColor="text-emerald-600"
++          valueColor="text-emerald-700"
++        />
++        <SummaryCard
++          title="미수금"
++          value={totalUnpaid}
++          icon={TrendingDown}
++          iconBg="bg-red-50"
++          iconColor="text-red-600"
++          valueColor={totalUnpaid > 0 ? "text-red-700" : "text-slate-400"}
++        />
+       </div>
+ 
+-      <Card className="border-2 border-gray-200">
+-        <CardHeader className="flex items-center justify-between">
+-          <CardTitle>검색 및 다운로드</CardTitle>
+-          <Button onClick={handleExportExcel} className="bg-green-600 hover:bg-green-700">
+-            <Download className="w-4 h-4 mr-2" />
+-            엑셀 다운로드
+-          </Button>
+-        </CardHeader>
+-        <CardContent>
+-          <div className="relative">
+-            <Search className="absolute left-3 top-3 w-4 h-4 text-gray-400" />
++      {/* Search */}
++      <Card className="bg-white border border-slate-200 rounded-xl shadow-sm">
++        <CardContent className="px-5 py-4">
++          <div className="relative max-w-sm">
++            <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-slate-400" />
+             <Input
+-              placeholder="검색..."
++              placeholder="부과월 검색 (예: 2026-06)"
+               value={searchText}
+               onChange={(e) => setSearchText(e.target.value)}
+-              className="pl-10"
++              className="pl-8 h-9 text-sm"
+             />
+           </div>
+         </CardContent>
+       </Card>
+ 
+-      <Card className="border-2 border-gray-200">
+-        <CardHeader>
+-          <CardTitle>납부현황 목록 ({records.length}건)</CardTitle>
++      {/* Table */}
++      <Card className="bg-white border border-slate-200 rounded-xl shadow-sm">
++        <CardHeader className="pb-3 pt-4 px-5 border-b border-slate-100">
++          <div className="flex items-center justify-between">
++            <CardTitle className="text-sm font-semibold text-slate-700 flex items-center gap-2">
++              <Receipt className="w-4 h-4 text-slate-400" />
++              납부현황 목록
++            </CardTitle>
++            {!isLoading && (
++              <span className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-full px-2.5 py-1 font-medium">
++                {filtered.length.toLocaleString()}건
++              </span>
++            )}
++          </div>
+         </CardHeader>
+-        <CardContent>
+-          <div className="overflow-x-auto">
+-            <Table>
+-              <TableHeader>
+-                <TableRow className="bg-gray-50">
+-                  <TableHead className="text-gray-700">부과월</TableHead>
+-                  <TableHead className="text-gray-700">부과액</TableHead>
+-                  <TableHead className="text-gray-700">납부여부</TableHead>
+-                  <TableHead className="text-gray-700">납부일자</TableHead>
+-                  <TableHead className="text-gray-700">납부액</TableHead>
+-                  <TableHead className="text-gray-700">미수금</TableHead>
+-                </TableRow>
+-              </TableHeader>
+-              <TableBody>
+-                {records.length === 0 ? (
+-                  <TableRow>
+-                    <TableCell colSpan={6} className="text-center py-8 text-gray-500">
+-                      데이터가 없습니다.
+-                    </TableCell>
++        <CardContent className="p-0">
++          {isLoading ? (
++            <div className="px-5 py-3">
++              <TableSkeleton />
++            </div>
++          ) : (
++            <div className="overflow-x-auto">
++              <Table>
++                <TableHeader>
++                  <TableRow className="bg-slate-50 hover:bg-slate-50 border-b border-slate-100">
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide pl-5">부과월</TableHead>
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">부과액</TableHead>
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">납부여부</TableHead>
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">납부일자</TableHead>
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">납부액</TableHead>
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide pr-5">미수금</TableHead>
+                   </TableRow>
+-                ) : (
+-                  records.map((record: any) => (
+-                    <TableRow key={record.id} className="hover:bg-gray-50">
+-                      <TableCell className="text-sm font-medium">{record.billingMonth}</TableCell>
+-                      <TableCell className="text-sm">{record.amount?.toLocaleString()}원</TableCell>
+-                      <TableCell>
+-                        <Badge className={record.isPaid ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}>
+-                          {record.isPaid ? "완납" : "미납"}
+-                        </Badge>
+-                      </TableCell>
+-                      <TableCell className="text-sm">{record.paidDate || "-"}</TableCell>
+-                      <TableCell className="text-sm">{record.paidAmount?.toLocaleString()}원</TableCell>
+-                      <TableCell className="text-sm font-medium text-red-600">
+-                        {(record.amount - record.paidAmount)?.toLocaleString()}원
++                </TableHeader>
++                <TableBody>
++                  {filtered.length === 0 ? (
++                    <TableRow>
++                      <TableCell colSpan={6} className="py-16 text-center">
++                        <FileSearch className="w-10 h-10 text-slate-200 mx-auto mb-3" />
++                        <p className="text-sm font-medium text-slate-400">데이터가 없습니다</p>
+                       </TableCell>
+                     </TableRow>
+-                  ))
+-                )}
+-              </TableBody>
+-            </Table>
+-          </div>
++                  ) : (
++                    filtered.map((record: any) => {
++                      const unpaid = (record.amount || 0) - (record.paidAmount || 0);
++                      return (
++                        <TableRow key={record.id} className="hover:bg-slate-50 border-b border-slate-50">
++                          <TableCell className="text-sm font-semibold text-slate-900 pl-5 py-3 font-mono">
++                            {record.billingMonth}
++                          </TableCell>
++                          <TableCell className="text-sm text-slate-800 py-3 tabular-nums">
++                            {record.amount?.toLocaleString()}원
++                          </TableCell>
++                          <TableCell className="py-3">
++                            {record.isPaid ? (
++                              <span className="inline-flex items-center text-xs font-medium rounded-full px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200">
++                                완납
++                              </span>
++                            ) : (
++                              <span className="inline-flex items-center text-xs font-medium rounded-full px-2 py-0.5 bg-red-50 text-red-700 border border-red-200">
++                                미납
++                              </span>
++                            )}
++                          </TableCell>
++                          <TableCell className="text-sm text-slate-600 py-3 font-mono">
++                            {record.paidDate || <span className="text-slate-300">-</span>}
++                          </TableCell>
++                          <TableCell className="text-sm text-slate-800 py-3 tabular-nums">
++                            {record.paidAmount?.toLocaleString()}원
++                          </TableCell>
++                          <TableCell className={`text-sm font-semibold py-3 pr-5 tabular-nums ${unpaid > 0 ? "text-red-600" : "text-slate-400"}`}>
++                            {unpaid > 0 ? `${unpaid.toLocaleString()}원` : "-"}
++                          </TableCell>
++                        </TableRow>
++                      );
++                    })
++                  )}
++                </TableBody>
++              </Table>
++            </div>
++          )}
+         </CardContent>
+       </Card>
+     </div>
+diff --git a/client/src/pages/ClosureEvents.tsx b/client/src/pages/ClosureEvents.tsx
+index 843fb4b..c9d0cdb 100644
+--- a/client/src/pages/ClosureEvents.tsx
++++ b/client/src/pages/ClosureEvents.tsx
+@@ -1,19 +1,34 @@
+-import { useState, useMemo } from "react";
++import { useState } from "react";
+ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+ import { Button } from "@/components/ui/button";
+-import { Badge } from "@/components/ui/badge";
+ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+-import { Loader2, Download, Filter, AlertCircle } from "lucide-react";
++import { Download, Filter, Building2, AlertCircle, FileSearch } from "lucide-react";
+ import { trpc } from "@/lib/trpc";
+ 
+-const REFLECT_STATUS_COLORS: Record<string, { bg: string; text: string }> = {
+-  반영완료: { bg: "bg-green-100", text: "text-green-800" },
+-  미수금있음: { bg: "bg-purple-100", text: "text-purple-800" },
+-  확인필요: { bg: "bg-red-100", text: "text-red-800" },
+-  보류: { bg: "bg-gray-100", text: "text-gray-800" },
++const REFLECT_STATUS_STYLE: Record<string, string> = {
++  반영완료: "bg-emerald-50 text-emerald-700 border border-emerald-200",
++  미수금있음: "bg-violet-50 text-violet-700 border border-violet-200",
++  확인필요: "bg-red-50 text-red-700 border border-red-200",
++  보류: "bg-slate-100 text-slate-600 border border-slate-200",
+ };
+ 
++const CLOSURE_TYPE_STYLE: Record<string, string> = {
++  폐업: "bg-red-50 text-red-700 border border-red-200",
++  양도: "bg-blue-50 text-blue-700 border border-blue-200",
++  이관: "bg-amber-50 text-amber-700 border border-amber-200",
++};
++
++function TableSkeleton() {
++  return (
++    <div className="space-y-2 py-2">
++      {[...Array(6)].map((_, i) => (
++        <div key={i} className="h-12 bg-slate-100 rounded-lg animate-pulse" />
++      ))}
++    </div>
++  );
++}
++
+ export default function ClosureEvents() {
+   const [filters, setFilters] = useState({
+     closureType: "all",
+@@ -28,17 +43,10 @@ export default function ClosureEvents() {
+   const handleExportExcel = () => {
+     const headers = ["구분", "관리번호", "지역", "차량번호", "성명", "접수일자", "처리일자", "기존 미수금액", "반영상태"];
+     const rows = closures.map((c: any) => [
+-      c.closureType || "",
+-      c.managementNo || "",
+-      c.region || "",
+-      c.vehicleNo || "",
+-      c.name || "",
+-      c.receiptDate || "",
+-      c.processDate || "",
+-      c.unpaidAmountAtClosure || 0,
+-      c.reflectStatus || "",
++      c.closureType || "", c.managementNo || "", c.region || "",
++      c.vehicleNo || "", c.name || "", c.receiptDate || "",
++      c.processDate || "", c.unpaidAmountAtClosure || 0, c.reflectStatus || "",
+     ]);
+-
+     const csv = [headers, ...rows].map((row: any) => row.map((cell: any) => `"${cell}"`).join(",")).join("\n");
+     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+     const link = document.createElement("a");
+@@ -47,35 +55,47 @@ export default function ClosureEvents() {
+     link.click();
+   };
+ 
+-  if (isLoading) {
+-    return (
+-      <div className="flex items-center justify-center h-screen">
+-        <Loader2 className="animate-spin w-8 h-8 text-muted-foreground" />
+-      </div>
+-    );
+-  }
++  const pendingCount = closures.filter((c: any) => c.reflectStatus !== "반영완료").length;
+ 
+   return (
+-    <div className="space-y-6 p-8">
+-      <div className="space-y-2">
+-        <h1 className="text-3xl font-bold text-gray-900">폐업 현황</h1>
+-        <p className="text-gray-600">폐업/양도/이관 처리 현황 관리</p>
++    <div className="p-6 space-y-5 max-w-7xl">
++      {/* Header */}
++      <div className="flex items-center justify-between">
++        <div>
++          <h1 className="text-xl font-bold text-slate-900">폐업·양도·이관 현황</h1>
++          <p className="text-sm text-slate-500 mt-0.5">폐업/양도/이관 처리 현황 및 미수금 관리</p>
++        </div>
++        <Button onClick={handleExportExcel} variant="outline" size="sm" className="gap-1.5 text-emerald-700 border-emerald-200 hover:bg-emerald-50">
++          <Download className="w-3.5 h-3.5" />
++          엑셀 다운로드
++        </Button>
+       </div>
+ 
+-      <Card className="border-2 border-gray-200">
+-        <CardHeader>
+-          <CardTitle className="flex items-center justify-between">
+-            <span>필터</span>
+-            <Filter className="w-5 h-5 text-gray-400" />
++      {/* Attention notice */}
++      {!isLoading && pendingCount > 0 && (
++        <div className="flex items-center gap-3 bg-orange-50 border border-orange-200 rounded-xl px-4 py-3">
++          <AlertCircle className="w-4 h-4 text-orange-600 flex-shrink-0" />
++          <p className="text-sm text-orange-800">
++            반영 미완료 항목이 <strong>{pendingCount}건</strong> 있습니다. 처리 현황을 확인하세요.
++          </p>
++        </div>
++      )}
++
++      {/* Filter Card */}
++      <Card className="bg-white border border-slate-200 rounded-xl shadow-sm">
++        <CardHeader className="pb-3 pt-4 px-5 border-b border-slate-100">
++          <CardTitle className="text-sm font-semibold text-slate-700 flex items-center gap-2">
++            <Filter className="w-4 h-4 text-slate-400" />
++            필터
+           </CardTitle>
+         </CardHeader>
+-        <CardContent>
+-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+-            <div className="space-y-2">
+-              <label className="text-sm font-medium text-gray-700">구분</label>
++        <CardContent className="px-5 py-4">
++          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
++            <div>
++              <label className="text-xs font-medium text-slate-600 block mb-1.5">구분</label>
+               <Select value={filters.closureType} onValueChange={(v) => setFilters({ ...filters, closureType: v })}>
+-                <SelectTrigger>
+-                  <SelectValue placeholder="선택" />
++                <SelectTrigger className="h-9 text-sm">
++                  <SelectValue placeholder="전체" />
+                 </SelectTrigger>
+                 <SelectContent>
+                   <SelectItem value="all">전체</SelectItem>
+@@ -86,11 +106,11 @@ export default function ClosureEvents() {
+               </Select>
+             </div>
+ 
+-            <div className="space-y-2">
+-              <label className="text-sm font-medium text-gray-700">반영상태</label>
++            <div>
++              <label className="text-xs font-medium text-slate-600 block mb-1.5">반영상태</label>
+               <Select value={filters.reflectStatus} onValueChange={(v) => setFilters({ ...filters, reflectStatus: v })}>
+-                <SelectTrigger>
+-                  <SelectValue placeholder="선택" />
++                <SelectTrigger className="h-9 text-sm">
++                  <SelectValue placeholder="전체" />
+                 </SelectTrigger>
+                 <SelectContent>
+                   <SelectItem value="all">전체</SelectItem>
+@@ -101,76 +121,92 @@ export default function ClosureEvents() {
+                 </SelectContent>
+               </Select>
+             </div>
+-
+-            <div className="flex items-end">
+-              <Button onClick={handleExportExcel} className="w-full bg-green-600 hover:bg-green-700">
+-                <Download className="w-4 h-4 mr-2" />
+-                엑셀 다운로드
+-              </Button>
+-            </div>
+           </div>
+         </CardContent>
+       </Card>
+ 
+-      <Card className="border-2 border-gray-200">
+-        <CardHeader>
+-          <CardTitle>폐업 현황 목록 ({closures.length}건)</CardTitle>
++      {/* Table Card */}
++      <Card className="bg-white border border-slate-200 rounded-xl shadow-sm">
++        <CardHeader className="pb-3 pt-4 px-5 border-b border-slate-100">
++          <div className="flex items-center justify-between">
++            <CardTitle className="text-sm font-semibold text-slate-700 flex items-center gap-2">
++              <Building2 className="w-4 h-4 text-slate-400" />
++              폐업 현황 목록
++            </CardTitle>
++            {!isLoading && (
++              <span className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-full px-2.5 py-1 font-medium">
++                {closures.length.toLocaleString()}건
++              </span>
++            )}
++          </div>
+         </CardHeader>
+-        <CardContent>
+-          <div className="overflow-x-auto">
+-            <Table>
+-              <TableHeader>
+-                <TableRow className="bg-gray-50">
+-                  <TableHead className="text-gray-700">구분</TableHead>
+-                  <TableHead className="text-gray-700">차량번호</TableHead>
+-                  <TableHead className="text-gray-700">성명</TableHead>
+-                  <TableHead className="text-gray-700">처리일자</TableHead>
+-                  <TableHead className="text-gray-700">기존 미수금액</TableHead>
+-                  <TableHead className="text-gray-700">제외시작월</TableHead>
+-                  <TableHead className="text-gray-700">반영상태</TableHead>
+-                </TableRow>
+-              </TableHeader>
+-              <TableBody>
+-                {closures.length === 0 ? (
+-                  <TableRow>
+-                    <TableCell colSpan={7} className="text-center py-8 text-gray-500">
+-                      데이터가 없습니다.
+-                    </TableCell>
++        <CardContent className="p-0">
++          {isLoading ? (
++            <div className="px-5 py-3">
++              <TableSkeleton />
++            </div>
++          ) : (
++            <div className="overflow-x-auto">
++              <Table>
++                <TableHeader>
++                  <TableRow className="bg-slate-50 hover:bg-slate-50 border-b border-slate-100">
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide pl-5">구분</TableHead>
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">차량번호</TableHead>
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">성명</TableHead>
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">처리일자</TableHead>
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">기존 미수금액</TableHead>
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">제외시작월</TableHead>
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide pr-5">반영상태</TableHead>
+                   </TableRow>
+-                ) : (
+-                  closures.map((closure: any) => (
+-                    <TableRow key={closure.id} className="hover:bg-gray-50">
+-                      <TableCell className="text-sm font-medium">{closure.closureType}</TableCell>
+-                      <TableCell className="text-sm font-medium">{closure.vehicleNo}</TableCell>
+-                      <TableCell className="text-sm">{closure.name}</TableCell>
+-                      <TableCell className="text-sm">{new Date(closure.processDate).toLocaleDateString("ko-KR")}</TableCell>
+-                      <TableCell className="text-sm font-medium">
+-                        <span>{(closure.unpaidAmountAtClosure || 0).toLocaleString()}원</span>
+-                        {closure.unpaidAmountAtClosure > 0 && (
+-                          <div className="flex items-center gap-1 text-xs text-red-600 mt-1">
+-                            <AlertCircle className="w-3 h-3" />
+-                            미수금 있음
+-                          </div>
+-                        )}
+-                      </TableCell>
+-                      <TableCell className="text-sm text-gray-900">
+-                        {closure.excludeStartMonth ? (
+-                          <span className="font-medium">{closure.excludeStartMonth}</span>
+-                        ) : (
+-                          <span className="text-gray-500">-</span>
+-                        )}
+-                      </TableCell>
+-                      <TableCell>
+-                        <Badge className={`${REFLECT_STATUS_COLORS[closure.reflectStatus]?.bg} ${REFLECT_STATUS_COLORS[closure.reflectStatus]?.text}`}>
+-                          {closure.reflectStatus}
+-                        </Badge>
++                </TableHeader>
++                <TableBody>
++                  {closures.length === 0 ? (
++                    <TableRow>
++                      <TableCell colSpan={7} className="py-16 text-center">
++                        <FileSearch className="w-10 h-10 text-slate-200 mx-auto mb-3" />
++                        <p className="text-sm font-medium text-slate-400">데이터가 없습니다</p>
++                        <p className="text-xs text-slate-300 mt-1">필터 조건을 변경해 보세요</p>
+                       </TableCell>
+                     </TableRow>
+-                  ))
+-                )}
+-              </TableBody>
+-            </Table>
+-          </div>
++                  ) : (
++                    closures.map((closure: any) => (
++                      <TableRow key={closure.id} className="hover:bg-slate-50 border-b border-slate-50">
++                        <TableCell className="pl-5 py-3">
++                          <span className={`inline-flex items-center text-xs font-medium rounded-full px-2 py-0.5 ${CLOSURE_TYPE_STYLE[closure.closureType] ?? "bg-slate-100 text-slate-600"}`}>
++                            {closure.closureType}
++                          </span>
++                        </TableCell>
++                        <TableCell className="text-sm font-semibold text-slate-900 py-3">{closure.vehicleNo}</TableCell>
++                        <TableCell className="text-sm text-slate-800 py-3">{closure.name}</TableCell>
++                        <TableCell className="text-sm text-slate-600 py-3 font-mono">
++                          {new Date(closure.processDate).toLocaleDateString("ko-KR")}
++                        </TableCell>
++                        <TableCell className="py-3">
++                          <div className="text-sm font-semibold text-slate-900">
++                            {(closure.unpaidAmountAtClosure || 0).toLocaleString()}원
++                          </div>
++                          {closure.unpaidAmountAtClosure > 0 && (
++                            <div className="flex items-center gap-1 text-xs text-red-600 mt-0.5">
++                              <AlertCircle className="w-3 h-3" />
++                              미수금 있음
++                            </div>
++                          )}
++                        </TableCell>
++                        <TableCell className="text-sm py-3 font-mono text-slate-700">
++                          {closure.excludeStartMonth || <span className="text-slate-300">-</span>}
++                        </TableCell>
++                        <TableCell className="py-3 pr-5">
++                          <span className={`inline-flex items-center text-xs font-medium rounded-full px-2 py-0.5 ${REFLECT_STATUS_STYLE[closure.reflectStatus] ?? "bg-slate-100 text-slate-600"}`}>
++                            {closure.reflectStatus}
++                          </span>
++                        </TableCell>
++                      </TableRow>
++                    ))
++                  )}
++                </TableBody>
++              </Table>
++            </div>
++          )}
+         </CardContent>
+       </Card>
+     </div>
+diff --git a/client/src/pages/Dashboard.tsx b/client/src/pages/Dashboard.tsx
+index b0b8191..504888e 100644
+--- a/client/src/pages/Dashboard.tsx
++++ b/client/src/pages/Dashboard.tsx
+@@ -1,32 +1,90 @@
+-import { useEffect, useState } from "react";
+ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+ import { Badge } from "@/components/ui/badge";
+-import { Loader2 } from "lucide-react";
++import { Button } from "@/components/ui/button";
++import {
++  Users,
++  CalendarCheck,
++  Building2,
++  AlertTriangle,
++  HelpCircle,
++  ArrowRight,
++  CheckCircle2,
++  XCircle,
++  Clock,
++  Activity,
++  TrendingUp,
++} from "lucide-react";
+ import { trpc } from "@/lib/trpc";
+ 
+-interface DashboardStats {
+-  nextMonthCount: number;
+-  thisMonthCount: number;
+-  closurePendingCount: number;
+-  unpaidCount: number;
+-  confirmNeededCount: number;
++function StatCard({
++  title,
++  value,
++  icon: Icon,
++  iconBg,
++  iconColor,
++  borderColor,
++  href,
++  alert,
++}: {
++  title: string;
++  value: number;
++  icon: React.ElementType;
++  iconBg: string;
++  iconColor: string;
++  borderColor: string;
++  href: string;
++  alert?: boolean;
++}) {
++  return (
++    <a href={href} className="block group">
++      <Card
++        className={`bg-white border border-slate-200 hover:shadow-md transition-all rounded-xl overflow-hidden ${
++          alert && value > 0 ? `border-l-4 ${borderColor}` : ""
++        }`}
++      >
++        <CardContent className="p-5">
++          <div className="flex items-start justify-between mb-3">
++            <div className={`w-10 h-10 rounded-xl ${iconBg} flex items-center justify-center flex-shrink-0`}>
++              <Icon className={`w-5 h-5 ${iconColor}`} />
++            </div>
++            <ArrowRight className="w-4 h-4 text-slate-300 group-hover:text-slate-500 group-hover:translate-x-0.5 transition-all" />
++          </div>
++          <div className="text-3xl font-bold text-slate-900 tabular-nums">{value.toLocaleString()}</div>
++          <div className="text-xs text-slate-500 mt-1 font-medium">{title}</div>
++        </CardContent>
++      </Card>
++    </a>
++  );
+ }
+ 
+-export default function Dashboard() {
+-  const [stats, setStats] = useState<DashboardStats | null>(null);
+-  const [loading, setLoading] = useState(true);
+-
+-  const { data: dashboardData, isLoading } = trpc.billing.getDashboardStats.useQuery();
++function SyncLogStatusBadge({ status }: { status: string }) {
++  if (status === "SUCCESS")
++    return (
++      <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
++        <CheckCircle2 className="w-3 h-3" />
++        성공
++      </span>
++    );
++  if (status === "FAIL")
++    return (
++      <span className="inline-flex items-center gap-1 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">
++        <XCircle className="w-3 h-3" />
++        실패
++      </span>
++    );
++  return (
++    <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
++      <Clock className="w-3 h-3" />
++      경고
++    </span>
++  );
++}
+ 
+-  useEffect(() => {
+-    if (dashboardData) {
+-      setStats(dashboardData);
+-      setLoading(false);
+-    }
+-  }, [dashboardData]);
++export default function Dashboard() {
++  const { data: dashboardData } = trpc.billing.getDashboardStats.useQuery();
++  const { data: recentLogs = [] } = trpc.billing.listSyncLogs.useQuery({});
+ 
+-  // Show loading skeleton while fetching, but don't block rendering
+-  const displayStats = stats || {
++  const stats = dashboardData ?? {
+     nextMonthCount: 0,
+     thisMonthCount: 0,
+     closurePendingCount: 0,
+@@ -34,110 +92,219 @@ export default function Dashboard() {
+     confirmNeededCount: 0,
+   };
+ 
++  const latestLogs = recentLogs.slice(0, 5);
++  const hasAttention = stats.closurePendingCount > 0 || stats.confirmNeededCount > 0 || stats.unpaidCount > 0;
++
+   const statCards = [
+     {
+       title: "다음 달 부과 대상",
+-      value: displayStats.nextMonthCount,
+-      color: "bg-yellow-50 border-yellow-200",
+-      badgeColor: "bg-yellow-100 text-yellow-800",
+-      icon: "📋",
++      value: stats.nextMonthCount,
++      icon: Users,
++      iconBg: "bg-blue-50",
++      iconColor: "text-blue-600",
++      borderColor: "border-blue-400",
++      href: "/candidates",
+     },
+     {
+       title: "이번 달 부과 예정",
+-      value: displayStats.thisMonthCount,
+-      color: "bg-blue-50 border-blue-200",
+-      badgeColor: "bg-blue-100 text-blue-800",
+-      icon: "📅",
++      value: stats.thisMonthCount,
++      icon: CalendarCheck,
++      iconBg: "bg-sky-50",
++      iconColor: "text-sky-600",
++      borderColor: "border-sky-400",
++      href: "/approval",
+     },
+     {
+       title: "폐업 반영 대기",
+-      value: displayStats.closurePendingCount,
+-      color: "bg-red-50 border-red-200",
+-      badgeColor: "bg-red-100 text-red-800",
+-      icon: "⚠️",
++      value: stats.closurePendingCount,
++      icon: Building2,
++      iconBg: "bg-orange-50",
++      iconColor: "text-orange-600",
++      borderColor: "border-orange-400",
++      href: "/closures",
++      alert: true,
+     },
+     {
+       title: "미수금 있음",
+-      value: displayStats.unpaidCount,
+-      color: "bg-purple-50 border-purple-200",
+-      badgeColor: "bg-purple-100 text-purple-800",
+-      icon: "💰",
++      value: stats.unpaidCount,
++      icon: TrendingUp,
++      iconBg: "bg-violet-50",
++      iconColor: "text-violet-600",
++      borderColor: "border-violet-400",
++      href: "/billing-records",
++      alert: true,
+     },
+     {
+       title: "확인 필요",
+-      value: displayStats.confirmNeededCount,
+-      color: "bg-orange-50 border-orange-200",
+-      badgeColor: "bg-orange-100 text-orange-800",
+-      icon: "🔍",
++      value: stats.confirmNeededCount,
++      icon: HelpCircle,
++      iconBg: "bg-red-50",
++      iconColor: "text-red-600",
++      borderColor: "border-red-400",
++      href: "/candidates",
++      alert: true,
+     },
+   ];
+ 
+   return (
+-    <div className="space-y-8 p-8">
+-      <div className="space-y-2">
+-        <h1 className="text-4xl font-bold text-gray-900">대시보드</h1>
+-        <p className="text-gray-600">협회비·관리비 부과 관리 시스템 현황</p>
++    <div className="p-6 space-y-6 max-w-7xl">
++      {/* Page Header */}
++      <div className="flex items-start justify-between">
++        <div>
++          <h1 className="text-xl font-bold text-slate-900">대시보드</h1>
++          <p className="text-sm text-slate-500 mt-0.5">협회비·관리비 부과 관리 시스템 현황</p>
++        </div>
++        <div className="text-right">
++          <p className="text-xs text-slate-400">오늘</p>
++          <p className="text-sm font-semibold text-slate-700">
++            {new Date().toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric" })}
++          </p>
++        </div>
+       </div>
+ 
+-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+-        {statCards.map((card, index) => (
+-          <Card key={index} className={`border-2 ${card.color} hover:shadow-lg transition-shadow`}>
+-            <CardHeader className="pb-3">
+-              <CardTitle className="text-sm font-medium text-gray-700 flex items-center justify-between">
+-                <span>{card.title}</span>
+-                <span className="text-2xl">{card.icon}</span>
+-              </CardTitle>
+-            </CardHeader>
+-            <CardContent>
+-              <div className="text-3xl font-bold text-gray-900">{card.value}</div>
+-              <p className="text-xs text-gray-500 mt-2">건</p>
+-            </CardContent>
+-          </Card>
++      {/* Attention Banner */}
++      {hasAttention && (
++        <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
++          <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
++          <div className="flex-1 min-w-0">
++            <p className="text-sm font-semibold text-amber-800">처리 필요 항목이 있습니다</p>
++            <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
++              {stats.closurePendingCount > 0 && (
++                <span className="text-xs text-amber-700">
++                  폐업 반영 대기 <strong>{stats.closurePendingCount}건</strong>
++                </span>
++              )}
++              {stats.unpaidCount > 0 && (
++                <span className="text-xs text-amber-700">
++                  미수금 <strong>{stats.unpaidCount}건</strong>
++                </span>
++              )}
++              {stats.confirmNeededCount > 0 && (
++                <span className="text-xs text-amber-700">
++                  확인 필요 <strong>{stats.confirmNeededCount}건</strong>
++                </span>
++              )}
++            </div>
++          </div>
++        </div>
++      )}
++
++      {/* Stat Cards */}
++      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
++        {statCards.map((card) => (
++          <StatCard key={card.title} {...card} />
+         ))}
+       </div>
+ 
+-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+-        <Card className="border-2 border-gray-200">
+-          <CardHeader>
+-            <CardTitle>최근 활동</CardTitle>
++      {/* Bottom Row */}
++      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
++        {/* Recent Sync Activity */}
++        <Card className="bg-white border border-slate-200 rounded-xl">
++          <CardHeader className="pb-3 border-b border-slate-100">
++            <div className="flex items-center justify-between">
++              <CardTitle className="text-sm font-semibold text-slate-800 flex items-center gap-2">
++                <Activity className="w-4 h-4 text-slate-400" />
++                최근 연동 로그
++              </CardTitle>
++              <a href="/sync-logs" className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">
++                전체 보기
++              </a>
++            </div>
+           </CardHeader>
+-          <CardContent>
+-            <div className="space-y-4">
+-              <div className="flex items-center justify-between py-3 border-b">
+-                <span className="text-sm text-gray-700">신규 등록 연동</span>
+-                <Badge className="bg-green-100 text-green-800">성공</Badge>
+-              </div>
+-              <div className="flex items-center justify-between py-3 border-b">
+-                <span className="text-sm text-gray-700">폐업 처리 연동</span>
+-                <Badge className="bg-yellow-100 text-yellow-800">대기</Badge>
++          <CardContent className="pt-3">
++            {latestLogs.length === 0 ? (
++              <div className="py-6 text-center">
++                <Activity className="w-8 h-8 text-slate-200 mx-auto mb-2" />
++                <p className="text-sm text-slate-400">연동 로그가 없습니다</p>
+               </div>
+-              <div className="flex items-center justify-between py-3">
+-                <span className="text-sm text-gray-700">부과 반영</span>
+-                <Badge className="bg-blue-100 text-blue-800">진행중</Badge>
++            ) : (
++              <div className="space-y-0">
++                {latestLogs.map((log: any, idx: number) => (
++                  <div
++                    key={log.id}
++                    className={`flex items-center justify-between py-2.5 ${
++                      idx < latestLogs.length - 1 ? "border-b border-slate-50" : ""
++                    }`}
++                  >
++                    <div className="min-w-0 flex-1">
++                      <p className="text-sm font-medium text-slate-800 truncate">
++                        {log.eventType === "REGISTER" ? "신규 등록 연동" : "폐업 처리 연동"}
++                      </p>
++                      <p className="text-xs text-slate-400 mt-0.5">
++                        {new Date(log.createdAt).toLocaleString("ko-KR", {
++                          month: "2-digit",
++                          day: "2-digit",
++                          hour: "2-digit",
++                          minute: "2-digit",
++                        })}
++                      </p>
++                    </div>
++                    <SyncLogStatusBadge status={log.status} />
++                  </div>
++                ))}
+               </div>
+-            </div>
++            )}
+           </CardContent>
+         </Card>
+ 
+-        <Card className="border-2 border-gray-200">
+-          <CardHeader>
+-            <CardTitle>빠른 링크</CardTitle>
++        {/* Quick Actions */}
++        <Card className="bg-white border border-slate-200 rounded-xl">
++          <CardHeader className="pb-3 border-b border-slate-100">
++            <CardTitle className="text-sm font-semibold text-slate-800">빠른 이동</CardTitle>
+           </CardHeader>
+-          <CardContent>
+-            <div className="space-y-3">
+-              <a href="/candidates" className="block p-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors">
+-                <div className="font-medium text-gray-900">다음 달 부과 대상자</div>
+-                <div className="text-xs text-gray-500">신규 등록 회원 관리</div>
+-              </a>
+-              <a href="/closures" className="block p-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors">
+-                <div className="font-medium text-gray-900">폐업 현황</div>
+-                <div className="text-xs text-gray-500">폐업/양도/이관 처리 현황</div>
+-              </a>
+-              <a href="/billing-records" className="block p-3 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors">
+-                <div className="font-medium text-gray-900">납부현황</div>
+-                <div className="text-xs text-gray-500">월별 부과 및 납부 현황</div>
+-              </a>
+-            </div>
++          <CardContent className="pt-3 space-y-2">
++            {[
++              {
++                href: "/candidates",
++                icon: Users,
++                iconBg: "bg-blue-50",
++                iconColor: "text-blue-600",
++                label: "다음 달 부과 대상자",
++                desc: "신규 등록 회원 부과 항목 확인",
++              },
++              {
++                href: "/approval",
++                icon: CalendarCheck,
++                iconBg: "bg-sky-50",
++                iconColor: "text-sky-600",
++                label: "이번 달 부과 예정",
++                desc: "당월 부과 반영 및 미리보기",
++              },
++              {
++                href: "/closures",
++                icon: Building2,
++                iconBg: "bg-orange-50",
++                iconColor: "text-orange-600",
++                label: "폐업·양도·이관 현황",
++                desc: "폐업 반영 처리 및 미수금 확인",
++              },
++              {
++                href: "/billing-records",
++                icon: TrendingUp,
++                iconBg: "bg-violet-50",
++                iconColor: "text-violet-600",
++                label: "납부현황",
++                desc: "월별 부과·납부 현황 조회",
++              },
++            ].map((item) => {
++              const Icon = item.icon;
++              return (
++                <a
++                  key={item.href}
++                  href={item.href}
++                  className="flex items-center gap-3 p-3 rounded-lg bg-slate-50 hover:bg-slate-100 transition-colors group"
++                >
++                  <div className={`w-8 h-8 rounded-lg ${item.iconBg} flex items-center justify-center flex-shrink-0`}>
++                    <Icon className={`w-4 h-4 ${item.iconColor}`} />
++                  </div>
++                  <div className="flex-1 min-w-0">
++                    <p className="text-sm font-medium text-slate-800">{item.label}</p>
++                    <p className="text-xs text-slate-500">{item.desc}</p>
++                  </div>
++                  <ArrowRight className="w-4 h-4 text-slate-300 group-hover:text-slate-500 flex-shrink-0 transition-colors" />
++                </a>
++              );
++            })}
+           </CardContent>
+         </Card>
+       </div>
+diff --git a/client/src/pages/SyncLogs.tsx b/client/src/pages/SyncLogs.tsx
+index 7bbdad0..af89067 100644
+--- a/client/src/pages/SyncLogs.tsx
++++ b/client/src/pages/SyncLogs.tsx
+@@ -1,17 +1,43 @@
+ import { useState } from "react";
+ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+-import { Badge } from "@/components/ui/badge";
+ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+-import { Loader2, Filter } from "lucide-react";
++import { Filter, CheckCircle2, XCircle, AlertTriangle, Activity, FileSearch } from "lucide-react";
+ import { trpc } from "@/lib/trpc";
+ 
+-const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
+-  SUCCESS: { bg: "bg-green-100", text: "text-green-800" },
+-  FAIL: { bg: "bg-red-100", text: "text-red-800" },
+-  WARNING: { bg: "bg-yellow-100", text: "text-yellow-800" },
++const STATUS_CONFIG: Record<string, { label: string; style: string; icon: React.ElementType }> = {
++  SUCCESS: {
++    label: "성공",
++    style: "bg-emerald-50 text-emerald-700 border border-emerald-200",
++    icon: CheckCircle2,
++  },
++  FAIL: {
++    label: "실패",
++    style: "bg-red-50 text-red-700 border border-red-200",
++    icon: XCircle,
++  },
++  WARNING: {
++    label: "경고",
++    style: "bg-amber-50 text-amber-700 border border-amber-200",
++    icon: AlertTriangle,
++  },
+ };
+ 
++const EVENT_TYPE_LABEL: Record<string, string> = {
++  REGISTER: "신규 등록",
++  CLOSURE: "폐업 처리",
++};
++
++function TableSkeleton() {
++  return (
++    <div className="space-y-2 py-2">
++      {[...Array(6)].map((_, i) => (
++        <div key={i} className="h-12 bg-slate-100 rounded-lg animate-pulse" />
++      ))}
++    </div>
++  );
++}
++
+ export default function SyncLogs() {
+   const [filters, setFilters] = useState({
+     eventType: "all",
+@@ -23,35 +49,60 @@ export default function SyncLogs() {
+     status: filters.status === "all" ? undefined : filters.status,
+   });
+ 
+-  if (isLoading) {
+-    return (
+-      <div className="flex items-center justify-center h-screen">
+-        <Loader2 className="animate-spin w-8 h-8 text-muted-foreground" />
+-      </div>
+-    );
+-  }
++  const successCount = logs.filter((l: any) => l.status === "SUCCESS").length;
++  const failCount = logs.filter((l: any) => l.status === "FAIL").length;
++  const warnCount = logs.filter((l: any) => l.status === "WARNING").length;
+ 
+   return (
+-    <div className="space-y-6 p-8">
+-      <div className="space-y-2">
+-        <h1 className="text-3xl font-bold text-gray-900">연동 로그</h1>
+-        <p className="text-gray-600">외부 시스템 연동 이력 및 상태 확인</p>
++    <div className="p-6 space-y-5 max-w-7xl">
++      {/* Header */}
++      <div>
++        <h1 className="text-xl font-bold text-slate-900">연동 로그</h1>
++        <p className="text-sm text-slate-500 mt-0.5">외부 시스템 연동 이력 및 상태 확인</p>
+       </div>
+ 
+-      <Card className="border-2 border-gray-200">
+-        <CardHeader>
+-          <CardTitle className="flex items-center justify-between">
+-            <span>필터</span>
+-            <Filter className="w-5 h-5 text-gray-400" />
++      {/* Stats Row */}
++      {!isLoading && logs.length > 0 && (
++        <div className="grid grid-cols-3 gap-3">
++          <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 flex items-center gap-3">
++            <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
++            <div>
++              <div className="text-xl font-bold text-emerald-800 tabular-nums">{successCount}</div>
++              <div className="text-xs text-emerald-600 font-medium">성공</div>
++            </div>
++          </div>
++          <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-center gap-3">
++            <XCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
++            <div>
++              <div className="text-xl font-bold text-red-800 tabular-nums">{failCount}</div>
++              <div className="text-xs text-red-600 font-medium">실패</div>
++            </div>
++          </div>
++          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-3">
++            <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0" />
++            <div>
++              <div className="text-xl font-bold text-amber-800 tabular-nums">{warnCount}</div>
++              <div className="text-xs text-amber-600 font-medium">경고</div>
++            </div>
++          </div>
++        </div>
++      )}
++
++      {/* Filter Card */}
++      <Card className="bg-white border border-slate-200 rounded-xl shadow-sm">
++        <CardHeader className="pb-3 pt-4 px-5 border-b border-slate-100">
++          <CardTitle className="text-sm font-semibold text-slate-700 flex items-center gap-2">
++            <Filter className="w-4 h-4 text-slate-400" />
++            필터
+           </CardTitle>
+         </CardHeader>
+-        <CardContent>
+-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+-            <div className="space-y-2">
+-              <label className="text-sm font-medium text-gray-700">이벤트 유형</label>
++        <CardContent className="px-5 py-4">
++          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-md">
++            <div>
++              <label className="text-xs font-medium text-slate-600 block mb-1.5">이벤트 유형</label>
+               <Select value={filters.eventType} onValueChange={(v) => setFilters({ ...filters, eventType: v })}>
+-                <SelectTrigger>
+-                  <SelectValue placeholder="선택" />
++                <SelectTrigger className="h-9 text-sm">
++                  <SelectValue placeholder="전체" />
+                 </SelectTrigger>
+                 <SelectContent>
+                   <SelectItem value="all">전체</SelectItem>
+@@ -61,11 +112,11 @@ export default function SyncLogs() {
+               </Select>
+             </div>
+ 
+-            <div className="space-y-2">
+-              <label className="text-sm font-medium text-gray-700">상태</label>
++            <div>
++              <label className="text-xs font-medium text-slate-600 block mb-1.5">상태</label>
+               <Select value={filters.status} onValueChange={(v) => setFilters({ ...filters, status: v })}>
+-                <SelectTrigger>
+-                  <SelectValue placeholder="선택" />
++                <SelectTrigger className="h-9 text-sm">
++                  <SelectValue placeholder="전체" />
+                 </SelectTrigger>
+                 <SelectContent>
+                   <SelectItem value="all">전체</SelectItem>
+@@ -75,64 +126,91 @@ export default function SyncLogs() {
+                 </SelectContent>
+               </Select>
+             </div>
+-
+-            <div className="space-y-2">
+-              <label className="text-sm font-medium text-gray-700">통계</label>
+-              <div className="flex gap-2 pt-2">
+-                <Badge className="bg-green-100 text-green-800">성공: {logs.filter((l: any) => l.status === "SUCCESS").length}</Badge>
+-                <Badge className="bg-red-100 text-red-800">실패: {logs.filter((l: any) => l.status === "FAIL").length}</Badge>
+-                <Badge className="bg-yellow-100 text-yellow-800">경고: {logs.filter((l: any) => l.status === "WARNING").length}</Badge>
+-              </div>
+-            </div>
+           </div>
+         </CardContent>
+       </Card>
+ 
+-      <Card className="border-2 border-gray-200">
+-        <CardHeader>
+-          <CardTitle>연동 로그 목록 ({logs.length}건)</CardTitle>
++      {/* Table Card */}
++      <Card className="bg-white border border-slate-200 rounded-xl shadow-sm">
++        <CardHeader className="pb-3 pt-4 px-5 border-b border-slate-100">
++          <div className="flex items-center justify-between">
++            <CardTitle className="text-sm font-semibold text-slate-700 flex items-center gap-2">
++              <Activity className="w-4 h-4 text-slate-400" />
++              연동 로그 목록
++            </CardTitle>
++            {!isLoading && (
++              <span className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-full px-2.5 py-1 font-medium">
++                {logs.length.toLocaleString()}건
++              </span>
++            )}
++          </div>
+         </CardHeader>
+-        <CardContent>
+-          <div className="overflow-x-auto">
+-            <Table>
+-              <TableHeader>
+-                <TableRow className="bg-gray-50">
+-                  <TableHead className="text-gray-700">이벤트</TableHead>
+-                  <TableHead className="text-gray-700">소스 ID</TableHead>
+-                  <TableHead className="text-gray-700">대상 ID</TableHead>
+-                  <TableHead className="text-gray-700">상태</TableHead>
+-                  <TableHead className="text-gray-700">메시지</TableHead>
+-                  <TableHead className="text-gray-700">생성 시간</TableHead>
+-                </TableRow>
+-              </TableHeader>
+-              <TableBody>
+-                {logs.length === 0 ? (
+-                  <TableRow>
+-                    <TableCell colSpan={6} className="text-center py-8 text-gray-500">
+-                      데이터가 없습니다.
+-                    </TableCell>
++        <CardContent className="p-0">
++          {isLoading ? (
++            <div className="px-5 py-3">
++              <TableSkeleton />
++            </div>
++          ) : (
++            <div className="overflow-x-auto">
++              <Table>
++                <TableHeader>
++                  <TableRow className="bg-slate-50 hover:bg-slate-50 border-b border-slate-100">
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide pl-5">이벤트</TableHead>
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">소스 ID</TableHead>
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">대상 ID</TableHead>
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">상태</TableHead>
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">메시지</TableHead>
++                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide pr-5">생성 시간</TableHead>
+                   </TableRow>
+-                ) : (
+-                  logs.map((log: any) => (
+-                    <TableRow key={log.id} className="hover:bg-gray-50">
+-                      <TableCell className="text-sm font-medium">{log.eventType}</TableCell>
+-                      <TableCell className="text-sm">{log.sourceId}</TableCell>
+-                      <TableCell className="text-sm">{log.targetId}</TableCell>
+-                      <TableCell>
+-                        <Badge className={`${STATUS_COLORS[log.status]?.bg} ${STATUS_COLORS[log.status]?.text}`}>
+-                          {log.status}
+-                        </Badge>
+-                      </TableCell>
+-                      <TableCell className="text-sm max-w-xs truncate">{log.message}</TableCell>
+-                      <TableCell className="text-sm text-gray-500">
+-                        {new Date(log.createdAt).toLocaleString("ko-KR")}
++                </TableHeader>
++                <TableBody>
++                  {logs.length === 0 ? (
++                    <TableRow>
++                      <TableCell colSpan={6} className="py-16 text-center">
++                        <FileSearch className="w-10 h-10 text-slate-200 mx-auto mb-3" />
++                        <p className="text-sm font-medium text-slate-400">연동 로그가 없습니다</p>
++                        <p className="text-xs text-slate-300 mt-1">필터 조건을 변경해 보세요</p>
+                       </TableCell>
+                     </TableRow>
+-                  ))
+-                )}
+-              </TableBody>
+-            </Table>
+-          </div>
++                  ) : (
++                    logs.map((log: any) => {
++                      const cfg = STATUS_CONFIG[log.status];
++                      const StatusIcon = cfg?.icon ?? Activity;
++                      return (
++                        <TableRow key={log.id} className="hover:bg-slate-50 border-b border-slate-50">
++                          <TableCell className="pl-5 py-3">
++                            <span className="text-sm font-medium text-slate-800">
++                              {EVENT_TYPE_LABEL[log.eventType] ?? log.eventType}
++                            </span>
++                          </TableCell>
++                          <TableCell className="text-sm text-slate-600 py-3 font-mono">{log.sourceId}</TableCell>
++                          <TableCell className="text-sm text-slate-600 py-3 font-mono">{log.targetId}</TableCell>
++                          <TableCell className="py-3">
++                            <span className={`inline-flex items-center gap-1 text-xs font-medium rounded-full px-2 py-0.5 ${cfg?.style ?? "bg-slate-100 text-slate-600"}`}>
++                              <StatusIcon className="w-3 h-3" />
++                              {cfg?.label ?? log.status}
++                            </span>
++                          </TableCell>
++                          <TableCell className="text-sm text-slate-600 py-3 max-w-xs truncate">
++                            {log.message || <span className="text-slate-300">-</span>}
++                          </TableCell>
++                          <TableCell className="text-xs text-slate-500 py-3 pr-5 font-mono whitespace-nowrap">
++                            {new Date(log.createdAt).toLocaleString("ko-KR", {
++                              year: "2-digit",
++                              month: "2-digit",
++                              day: "2-digit",
++                              hour: "2-digit",
++                              minute: "2-digit",
++                            })}
++                          </TableCell>
++                        </TableRow>
++                      );
++                    })
++                  )}
++                </TableBody>
++              </Table>
++            </div>
++          )}
+         </CardContent>
+       </Card>
+     </div>
