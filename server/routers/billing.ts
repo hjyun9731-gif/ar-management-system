@@ -232,10 +232,12 @@ function makeRegisterPreviewItem(params: {
 
 function buildRegisterPreviewItems(row: z.infer<typeof registerRowSchema>, list: any[], nextIndex: () => number): PreviewRegisterItem[] {
   const items: PreviewRegisterItem[] = [];
+  const isBaeVehicle = String(row.vehicleNo || "").includes("배");
 
-  // 1) 일반/개인/택배 모두 가입일자가 있으면 협회비 대상이다.
-  //    택배회원도 가입일자가 있으면 관리비가 아니라 협회비로만 본다.
-  if (hasValue(row.joinDate)) {
+  // 1단계 확정 규칙 1:
+  // 일반 가입자(배번호 제외)는 가입일자가 있으면 협회비 대상이다.
+  // 배번호 차량은 이 규칙에서 제외하고 택배/관리비 규칙에서 따로 판단한다.
+  if (!isBaeVehicle && hasValue(row.joinDate)) {
     items.push(makeRegisterPreviewItem({
       row,
       rowIndex: nextIndex(),
@@ -244,13 +246,14 @@ function buildRegisterPreviewItems(row: z.infer<typeof registerRowSchema>, list:
       billingStartMonth: nextBillingMonth(row.joinDate) || "",
       status: "대기",
       billingSource: "가입일자",
-      reason: row.memberType === "택배회원" ? "택배회원 가입일자 기준 협회비" : "가입일자 기준 협회비",
+      reason: "일반 가입자(배번호 제외) 가입일자 기준 협회비",
     }));
     return items;
   }
 
-  // 2) 택배회원은 가입일자가 없고 인가일자 + 자격증명발급일자가 모두 있을 때만 관리비 대상이다.
-  if (row.memberType === "택배회원") {
+  // 배번호 차량은 가입일자 협회비 규칙에서 제외한다.
+  // 택배/관리비 규칙은 별도 기준으로 판단한다.
+  if (isBaeVehicle || row.memberType === "택배회원") {
     const hasApproval = hasValue(row.approvalDate);
     const hasCertificate = hasValue(row.certificateDate);
 
@@ -285,9 +288,9 @@ function buildRegisterPreviewItems(row: z.infer<typeof registerRowSchema>, list:
   }
 
   // 3) 아무 부과항목도 만들 수 없으면 확인필요
-  const reason = row.memberType === "택배회원"
-    ? "가입일자 없음 / 인가일자·자격증명발급일자 부족"
-    : "가입일자 누락";
+  const reason = isBaeVehicle || row.memberType === "택배회원"
+    ? "배번호 차량 / 인가일자·자격증명발급일자 부족"
+    : "일반 가입자(배번호 제외) 가입일자 누락";
   items.push(makeRegisterPreviewItem({
     row,
     rowIndex: nextIndex(),
@@ -433,8 +436,9 @@ function toDateString(value: any): string | undefined {
 }
 
 function mapMemberType(category: any, vehicleNo?: string): "개인회원" | "택배회원" {
-  const value = String(category || "").trim();
-  if (value.includes("택배") || String(vehicleNo || "").includes("배")) return "택배회원";
+  // 1단계 기준: 차량번호에 "배"가 들어간 배번호만 택배로 본다.
+  // 배번호 제외 차량은 일반/개인 부과대상 판단으로 보며, 가입일자 기준 협회비 대상이다.
+  if (String(vehicleNo || "").includes("배")) return "택배회원";
   return "개인회원";
 }
 
