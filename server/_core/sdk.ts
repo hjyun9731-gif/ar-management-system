@@ -200,7 +200,7 @@ class SDKServer {
     cookieValue: string | undefined | null
   ): Promise<{ openId: string; appId: string; name: string } | null> {
     if (!cookieValue) {
-      console.warn("[Auth] Missing session cookie");
+      // Silent return for internal management system - no session cookie is normal
       return null;
     }
 
@@ -262,7 +262,9 @@ class SDKServer {
     const session = await this.verifySession(sessionCookie);
 
     if (!session) {
-      throw ForbiddenError("Invalid session cookie");
+      // For internal management system, return null instead of throwing error
+      // This allows public procedures to work without authentication
+      return null as any;
     }
 
     if (session.openId.startsWith(CRON_OPEN_ID_PREFIX)) {

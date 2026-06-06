@@ -319,7 +319,7 @@ export const billingRouter = router({
     }),
 
   // 다음 달 부과 대상자 목록 조회
-  listCandidates: protectedProcedure
+  listCandidates: publicProcedure
     .input(
       z.object({
         region: z.string().optional(),
@@ -339,14 +339,14 @@ export const billingRouter = router({
     }),
 
   // 부과 대상자 상세 조회
-  getCandidate: protectedProcedure
+  getCandidate: publicProcedure
     .input(z.object({ id: z.number() }))
     .query(async ({ input }) => {
       return await getBillingCandidateById(input.id);
     }),
 
   // 부과 대상자 상태 업데이트
-  updateCandidate: protectedProcedure
+  updateCandidate: publicProcedure
     .input(
       z.object({
         id: z.number(),
@@ -365,7 +365,7 @@ export const billingRouter = router({
     }),
 
   // 폐업 현황 목록 조회
-  listClosures: protectedProcedure
+  listClosures: publicProcedure
     .input(
       z.object({
         closureType: z.string().optional(),
@@ -381,7 +381,7 @@ export const billingRouter = router({
     }),
 
   // 연동 로그 조회
-  listSyncLogs: protectedProcedure
+  listSyncLogs: publicProcedure
     .input(
       z.object({
         eventType: z.string().optional(),
@@ -397,7 +397,7 @@ export const billingRouter = router({
     }),
 
   // 납부현황 조회
-  listBillingRecords: protectedProcedure
+  listBillingRecords: publicProcedure
     .input(
       z.object({
         billingCandidateId: z.number().optional(),
@@ -408,7 +408,7 @@ export const billingRouter = router({
     }),
 
   // 대시보드 통계
-  getDashboardStats: protectedProcedure.query(async () => {
+  getDashboardStats: publicProcedure.query(async () => {
     const candidates = await getBillingCandidates();
     const list = await candidates;
 
@@ -428,7 +428,7 @@ export const billingRouter = router({
   }),
 
   // 수동 부과 배치 실행
-  runManualBillingBatch: protectedProcedure
+  runManualBillingBatch: publicProcedure
     .input(
       z.object({
         month: z.string().regex(/^\d{4}-\d{2}$/, "YYYY-MM 형식이어야 합니다"),

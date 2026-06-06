@@ -6,7 +6,20 @@ import superjson from "superjson";
 import App from "./App";
 import "./index.css";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: (failureCount, error: any) => {
+        // Don't retry auth.me queries - auth is optional for internal management system
+        if (error?.data?.path?.includes('auth.me')) {
+          return false;
+        }
+        // Retry other queries up to 3 times
+        return failureCount < 3;
+      },
+    },
+  },
+});
 
 // Log errors for debugging
 queryClient.getQueryCache().subscribe(event => {
