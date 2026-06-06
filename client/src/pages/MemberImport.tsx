@@ -67,7 +67,7 @@ type PreviewItem = {
   billingType?: string;
   billingStartMonth?: string;
   status?: string;
-  billingSource?: "가입일자" | "인가일자+자격증명" | "확인필요";
+  billingSource?: "가입일자" | "인가일자" | "인가일자+자격증명" | "확인필요";
   duplicateId?: number;
   closureType?: string;
   excludeStartMonth?: string;
@@ -134,7 +134,7 @@ const CATEGORY_CONFIG: Record<
   string,
   { label: string; style: string; icon: React.ElementType }
 > = {
-  신규: { label: "신규 대상자", style: "bg-sky-50 text-sky-700 border border-sky-200", icon: Users },
+  신규: { label: "부과 대상자", style: "bg-sky-50 text-sky-700 border border-sky-200", icon: Users },
   폐업양도이관: { label: "폐업/양도/이관", style: "bg-red-50 text-red-700 border border-red-200", icon: Building2 },
   중복의심: { label: "중복 의심", style: "bg-amber-50 text-amber-700 border border-amber-200", icon: AlertTriangle },
   날짜누락: { label: "날짜 누락", style: "bg-orange-50 text-orange-700 border border-orange-200", icon: CalendarX },
@@ -355,7 +355,7 @@ export default function MemberImport() {
             <div>
               <p className="text-sm text-slate-700 font-medium">회원관리시스템에서 단계별 부과대상자를 미리보기합니다.</p>
               <p className="text-xs text-slate-500 mt-1">
-                1단계는 일반 가입자 협회비, 2단계는 택배 미가입자 관리비입니다. 회원관리시스템은 읽기 전용이며 기본 선택 해제 상태로 표시됩니다.
+                1단계는 일반 가입자 협회비, 2단계는 택배 미가입자 관리비입니다. 2단계는 인가일자를 기준으로 다음 달 부과 여부를 판단합니다. 예: 2026.05 인가 → 2026.06 이번 달 부과예정.
               </p>
             </div>
             <div className="flex flex-col sm:flex-row gap-2">
@@ -585,7 +585,7 @@ export default function MemberImport() {
                             />
                           </TableCell>
                           <TableCell className="text-xs text-slate-600 py-3 font-medium">
-                            {item.type === "REGISTER" ? "신규등록" : "폐업/양도/이관"}
+                            {item.type === "REGISTER" ? "부과대상" : "폐업/양도/이관"}
                           </TableCell>
                           <TableCell className="text-sm font-semibold text-slate-900 py-3 font-mono">
                             {item.vehicleNo}

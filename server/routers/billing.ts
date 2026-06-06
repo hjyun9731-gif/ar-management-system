@@ -11,8 +11,11 @@ import {
   getSyncLogs,
   getBillingRecords,
   createBillingRecord,
+  getDb,
 } from "../db";
 import { TRPCError } from "@trpc/server";
+import { eq } from "drizzle-orm";
+import { billingCandidates } from "../../drizzle/schema";
 
 // 회원관리시스템 날짜 포맷 정규화
 // 지원 예: 18.10.24 -> 2018-10-24, 2018.10.24 -> 2018-10-24, 18-10-24 -> 2018-10-24
@@ -63,6 +66,27 @@ function nextBillingMonth(base?: string | Date): string | null {
 
 // Drizzle MySQL date column은 Date 객체가 아니라 YYYY-MM-DD 문자열로 넣어야 안전하다.
 // Date 객체가 들어가면 MySQL에 "Thu Nov..." 형태로 전달되어 insert가 실패할 수 있다.
+
+
+function getMonthKey(value?: string | null): string | null {
+  if (!value) return null;
+  const normalized = normalizeDateString(value) || String(value).trim();
+  const match = normalized.match(/^(\d{4})-(\d{2})/);
+  return match ? `${match[1]}-${match[2]}` : null;
+}
+
+function getCurrentMonthKey(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function determinePreviewStatus(billingStartDate?: string): "대기" | "부과예정" {
+  const monthKey = getMonthKey(billingStartDate);
+  if (!monthKey) return "대기";
+  // 이번 달 부과대상 판단: 예) 2026-05-dd 인가 → 2026-06-dd 부과시작 → 6월 부과예정
+  return monthKey === getCurrentMonthKey() ? "부과예정" : "대기";
+}
+
 function toDbDate(value: any): string | undefined {
   return normalizeDateString(value) || undefined;
 }
@@ -205,7 +229,7 @@ interface PreviewRegisterItem {
   billingType: string;
   billingStartMonth: string;
   status: string;
-  billingSource?: "가입일자" | "인가일자+자격증명" | "확인필요";
+  billingSource?: "가입일자" | "인가일자" | "인가일자+자격증명" | "확인필요";
   duplicateId?: number;
   reason?: string;
   raw: z.infer<typeof registerRowSchema>;
@@ -235,7 +259,7 @@ function makeRegisterPreviewItem(params: {
   billingType: "협회비" | "관리비" | "확인필요";
   billingStartMonth: string;
   status: string;
-  billingSource: "가입일자" | "인가일자+자격증명" | "확인필요";
+  billingSource: "가입일자" | "인가일자" | "인가일자+자격증명" | "확인필요";
   reason?: string;
 }): PreviewRegisterItem {
   const duplicateId = params.billingType === "확인필요"
@@ -294,7 +318,10 @@ function buildRegisterPreviewItems(
 
     const hasApprovalDate = !!normalizeDateString(row.approvalDate);
     const hasCertificateDate = !!normalizeDateString(row.certificateDate);
-    const billingStartDate = hasCertificateDate ? (nextBillingMonth(row.certificateDate) || "") : "";
+    // 2단계 관리비 부과시작일 판단은 인가일자를 기준으로 한다.
+    // 예: 2026-05-dd 인가 받은 택배 미가입자 → 2026-06-dd부터 관리비 부과대상.
+    // 자격증명발급일자는 관리비 편입 조건 확인용으로 함께 요구한다.
+    const billingStartDate = hasApprovalDate ? (nextBillingMonth(row.approvalDate) || "") : "";
 
     if (hasApprovalDate && hasCertificateDate) {
       return [makeRegisterPreviewItem({
@@ -303,9 +330,11 @@ function buildRegisterPreviewItems(
         list,
         billingType: "관리비",
         billingStartMonth: billingStartDate,
-        status: "대기",
-        billingSource: "인가일자+자격증명",
-        reason: "택배 미가입자 인가일자 및 자격증명발급일자 기준 관리비",
+        status: determinePreviewStatus(billingStartDate),
+        billingSource: "인가일자",
+        reason: getMonthKey(billingStartDate) === getCurrentMonthKey()
+          ? "택배 미가입자 인가일자 기준 이번 달 관리비 부과대상"
+          : "택배 미가입자 인가일자 기준 관리비",
       })];
     }
 
@@ -348,8 +377,10 @@ function buildRegisterPreviewItems(
     list,
     billingType: "협회비",
     billingStartMonth: billingStartDate,
-    status: "대기",
-    billingSource: "가입일자",
+    status: determinePreviewStatus(billingStartDate),
+    // 기존 회원 부과대상 추출이므로 신규 판단이 아니라 실제 기준일을 남긴다.
+    // 가입일자 파싱 가능 -> 가입일자 기준, 가입일자 O/공란 등 오래된 가입자 -> 인가일자 기준, 둘 다 없으면 부과시작일 없이 협회비 대상.
+    billingSource: basis === "인가일자" ? "인가일자" : "가입일자",
     reason: basis === "가입일자"
       ? "일반 가입자(배번호 제외) 가입일자 기준 협회비"
       : basis === "인가일자"
@@ -1121,6 +1152,41 @@ export const billingRouter = router({
     .mutation(async ({ input }) => {
       const items = await buildPreview(input.rows, input.step);
       return { items };
+    }),
+
+  // 다음 달 부과 대상 삭제
+  // 잘못 반영한 테스트 건을 화면에서 정리하기 위한 기능이다.
+  // 이미 실제 부과 이력이 생성된 건은 안전상 삭제하지 않는다.
+  deleteCandidate: publicProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      const existing = await getBillingCandidateById(input.id);
+      if (!existing) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "삭제할 부과 대상자를 찾을 수 없습니다." });
+      }
+
+      const records = await getBillingRecords(input.id);
+      if (records.length > 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "이미 부과/납부 이력이 연결된 대상자는 삭제할 수 없습니다. 보류 또는 제외 처리로 관리하세요.",
+        });
+      }
+
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available" });
+
+      await db.delete(billingCandidates).where(eq(billingCandidates.id, input.id));
+
+      await createSyncLog({
+        eventType: "DELETE",
+        sourceId: existing.sourceSystemId || `candidate-${input.id}`,
+        targetId: String(input.id),
+        status: "SUCCESS",
+        message: `부과 대상 삭제: ${existing.vehicleNo || ""} ${existing.name || ""} / ${existing.billingType || ""}`.trim(),
+      });
+
+      return { status: "success", id: input.id };
     }),
 
   // 회원관리 자료 불러오기 - 반영 (선택된 rowIndex만 처리)
