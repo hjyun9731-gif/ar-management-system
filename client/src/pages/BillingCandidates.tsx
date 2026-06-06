@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Download, Search, Filter, Users, FileSearch, Trash2, Loader2 } from "lucide-react";
+import { Download, Search, Filter, Users, FileSearch, Trash2, Loader2, RotateCcw } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { CandidateDetailModal } from "@/components/CandidateDetailModal";
 import { toast } from "sonner";
@@ -27,15 +27,11 @@ const BILLING_TYPE_STYLE: Record<string, string> = {
 
 function getCalculationReason(candidate: any): string {
   const memo = String(candidate.memo || "");
-  if (memo.includes("인가일자+자격증명")) return "관리비: 자격증명발급일자 기준";
+  if (memo.includes("자격증명")) return "관리비: 자격증명발급일자 기준";
   if (memo.includes("인가일자 기준")) return "협회비: 인가일자 기준";
   if (memo.includes("가입일자")) return "협회비: 가입일자 기준";
-
-  if (candidate.billingType === "관리비") return "관리비: certificateDate 기준";
-  if (candidate.billingType === "협회비") {
-    if (candidate.joinDate) return "협회비: 가입/인가 기준";
-    return "협회비: 부과대상";
-  }
+  if (candidate.billingType === "관리비") return "관리비 부과대상";
+  if (candidate.billingType === "협회비") return "협회비 부과대상";
   return "확인 필요";
 }
 
@@ -56,12 +52,7 @@ function TableSkeleton() {
 }
 
 export default function BillingCandidates() {
-  const [filters, setFilters] = useState({
-    region: "all",
-    memberType: "all",
-    status: "all",
-    billingStartMonth: "",
-  });
+  const [filters, setFilters] = useState({ region: "all", memberType: "all", status: "all", billingStartMonth: "" });
   const [searchText, setSearchText] = useState("");
   const [selectedCandidateId, setSelectedCandidateId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
@@ -87,30 +78,25 @@ export default function BillingCandidates() {
     },
   });
 
+  const resetMutation = trpc.billing.deleteAllCandidates.useMutation({
+    onSuccess: async (result: any) => {
+      toast.success(`초기화 완료: ${result.deleted ?? 0}건 삭제, ${result.skipped ?? 0}건 건너뜀`);
+      await utils.billing.listCandidates.invalidate();
+      await utils.billing.listSyncLogs.invalidate();
+    },
+    onError: (error) => toast.error(error.message || "전체 초기화 실패"),
+  });
+
   const filteredCandidates = useMemo(() => {
     const keyword = searchText.trim();
     if (!keyword) return candidates;
-    return candidates.filter(
-      (c: any) =>
-        c.vehicleNo?.includes(keyword) ||
-        c.name?.includes(keyword) ||
-        c.managementNo?.includes(keyword)
-    );
+    return candidates.filter((c: any) => c.vehicleNo?.includes(keyword) || c.name?.includes(keyword) || c.managementNo?.includes(keyword));
   }, [candidates, searchText]);
 
   const handleDownloadExcel = () => {
     const csv = [
       ["차량번호", "성명", "지역", "구분", "부과항목", "부과시작일", "상태", "계산 근거"],
-      ...filteredCandidates.map((c: any) => [
-        c.vehicleNo,
-        c.name,
-        c.region || "",
-        c.memberType,
-        c.billingType,
-        c.billingStartMonth || "",
-        c.status,
-        getCalculationReason(c),
-      ]),
+      ...filteredCandidates.map((c: any) => [c.vehicleNo, c.name, c.region || "", c.memberType, c.billingType, c.billingStartMonth || "", c.status, getCalculationReason(c)]),
     ]
       .map((row: any[]) => row.map((cell: any) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(","))
       .join("\n");
@@ -123,12 +109,21 @@ export default function BillingCandidates() {
   };
 
   const handleDelete = (candidate: any) => {
-    const ok = window.confirm(
-      `이 부과 대상자를 삭제할까요?\n\n${candidate.vehicleNo || ""} ${candidate.name || ""}\n${candidate.billingType || ""} / ${candidate.billingStartMonth || "부과시작일 없음"}\n\n테스트로 잘못 반영한 건만 삭제하세요.`
-    );
+    const ok = window.confirm(`이 부과 대상자를 삭제할까요?\n\n${candidate.vehicleNo || ""} ${candidate.name || ""}\n${candidate.billingType || ""} / ${candidate.billingStartMonth || "부과시작일 없음"}`);
     if (!ok) return;
     setDeletingId(candidate.id);
     deleteMutation.mutate({ id: candidate.id });
+  };
+
+  const handleResetAll = () => {
+    const first = window.confirm(`현재 부과 대상 ${candidates.length.toLocaleString()}건을 전체 초기화할까요?\n\n실제 부과/납부 이력이 연결된 건은 자동으로 건너뜁니다.\n연동 로그는 감사 기록이라 삭제하지 않습니다.`);
+    if (!first) return;
+    const typed = window.prompt('정말 처음부터 다시 하려면 아래에 전체삭제 라고 입력하세요.');
+    if (typed !== '전체삭제') {
+      toast.info('전체 초기화를 취소했습니다.');
+      return;
+    }
+    resetMutation.mutate({ confirmText: '전체삭제' });
   };
 
   return (
@@ -138,16 +133,20 @@ export default function BillingCandidates() {
           <h1 className="text-2xl font-bold tracking-tight text-slate-950">다음 달 부과 대상</h1>
           <p className="mt-1 text-sm text-slate-500">회원관리시스템에서 추출한 협회비·관리비 부과 대상자를 확인하고 관리합니다.</p>
         </div>
-        <Button onClick={handleDownloadExcel} variant="outline" className="h-9 gap-2 border-emerald-200 text-emerald-700 hover:bg-emerald-50">
-          <Download className="h-4 w-4" /> 엑셀 다운로드
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={handleResetAll} variant="outline" disabled={resetMutation.isPending || candidates.length === 0} className="h-9 gap-2 border-red-200 text-red-700 hover:bg-red-50">
+            {resetMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+            전체 초기화
+          </Button>
+          <Button onClick={handleDownloadExcel} variant="outline" className="h-9 gap-2 border-emerald-200 text-emerald-700 hover:bg-emerald-50">
+            <Download className="h-4 w-4" /> 엑셀 다운로드
+          </Button>
+        </div>
       </div>
 
       <Card className="border-slate-200 shadow-sm">
         <CardHeader className="border-b border-slate-100">
-          <CardTitle className="flex items-center gap-2 text-base text-slate-900">
-            <Filter className="h-4 w-4 text-slate-400" /> 검색 및 필터
-          </CardTitle>
+          <CardTitle className="flex items-center gap-2 text-base text-slate-900"><Filter className="h-4 w-4 text-slate-400" /> 검색 및 필터</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4 pt-5 md:grid-cols-5">
           <div className="md:col-span-2">
@@ -221,9 +220,7 @@ export default function BillingCandidates() {
                 <TableHead className="text-right">관리</TableHead>
               </TableRow>
             </TableHeader>
-            {isLoading ? (
-              <TableSkeleton />
-            ) : (
+            {isLoading ? <TableSkeleton /> : (
               <TableBody>
                 {filteredCandidates.length === 0 ? (
                   <TableRow>
@@ -235,28 +232,30 @@ export default function BillingCandidates() {
                       </div>
                     </TableCell>
                   </TableRow>
-                ) : (
-                  filteredCandidates.map((candidate: any) => (
-                    <TableRow key={candidate.id} className="hover:bg-slate-50/70">
-                      <TableCell className="font-semibold text-slate-900">{candidate.vehicleNo}</TableCell>
-                      <TableCell>{candidate.name}</TableCell>
-                      <TableCell className="text-slate-600">{candidate.memberType}</TableCell>
-                      <TableCell><Badge className={BILLING_TYPE_STYLE[candidate.billingType] || BILLING_TYPE_STYLE.확인필요}>{candidate.billingType}</Badge></TableCell>
-                      <TableCell className="text-xs text-slate-500">{getCalculationReason(candidate)}</TableCell>
-                      <TableCell className="text-slate-700">{candidate.billingStartMonth || "-"}</TableCell>
-                      <TableCell><Badge className={STATUS_STYLE[candidate.status] || STATUS_STYLE.대기}>{candidate.status}</Badge></TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-1">
-                          <Button variant="ghost" size="sm" onClick={() => setSelectedCandidateId(candidate.id)} className="h-7 px-3 text-xs text-indigo-600 hover:bg-indigo-50 hover:text-indigo-700">상세 보기</Button>
-                          <Button variant="ghost" size="sm" onClick={() => handleDelete(candidate)} disabled={deleteMutation.isPending && deletingId === candidate.id} className="h-7 px-2 text-xs text-red-600 hover:bg-red-50 hover:text-red-700">
-                            {deleteMutation.isPending && deletingId === candidate.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                            <span className="ml-1">삭제</span>
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
+                ) : filteredCandidates.map((candidate: any) => (
+                  <TableRow key={candidate.id} className="hover:bg-slate-50/70">
+                    <TableCell className="font-semibold text-slate-900">{candidate.vehicleNo}</TableCell>
+                    <TableCell>
+                      <button type="button" onClick={() => setSelectedCandidateId(candidate.id)} className="font-medium text-slate-900 underline-offset-4 hover:text-indigo-700 hover:underline">
+                        {candidate.name}
+                      </button>
+                    </TableCell>
+                    <TableCell className="text-slate-600">{candidate.memberType}</TableCell>
+                    <TableCell><Badge className={BILLING_TYPE_STYLE[candidate.billingType] || BILLING_TYPE_STYLE.확인필요}>{candidate.billingType}</Badge></TableCell>
+                    <TableCell className="text-xs text-slate-500">{getCalculationReason(candidate)}</TableCell>
+                    <TableCell className="text-slate-700">{candidate.billingStartMonth || "-"}</TableCell>
+                    <TableCell><Badge className={STATUS_STYLE[candidate.status] || STATUS_STYLE.대기}>{candidate.status}</Badge></TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1">
+                        <Button variant="ghost" size="sm" onClick={() => setSelectedCandidateId(candidate.id)} className="h-7 px-3 text-xs text-indigo-600 hover:bg-indigo-50 hover:text-indigo-700">상세 보기</Button>
+                        <Button variant="ghost" size="sm" onClick={() => handleDelete(candidate)} disabled={deleteMutation.isPending && deletingId === candidate.id} className="h-7 px-2 text-xs text-red-600 hover:bg-red-50 hover:text-red-700">
+                          {deleteMutation.isPending && deletingId === candidate.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                          <span className="ml-1">삭제</span>
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
               </TableBody>
             )}
           </Table>

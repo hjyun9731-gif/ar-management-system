@@ -625,7 +625,7 @@ function mapMemberSystemMemberToImportRow(member: any): ImportRow {
     vehicleNo,
     name: firstValue(member.name, member.성명, member.owner_name) || "",
     rrn: firstValue(member.resident_number, member.rrn, member.주민번호) || undefined,
-    mobile: firstValue(member.mobile, member.phone, member.핸드폰, member.휴대폰) || undefined,
+    mobile: normalizedMobile.mobile,
     memberType: mapMemberType(member.category, vehicleNo),
     joinDate,
     joinStatus: effectiveJoinStatus || undefined,
@@ -634,7 +634,7 @@ function mapMemberSystemMemberToImportRow(member: any): ImportRow {
     vehicleType: firstValue(member.vehicle_type, member.vehicleType, member.차종) || undefined,
     businessNo: firstValue(member.business_number, member.businessNo, member.사업자번호) || undefined,
     company: firstValue(member.affiliated_company, member.company_name, member.company, member.소속업체) || undefined,
-    memo: firstValue(member.memo, member.메모, member.note, member.비고) || undefined,
+    memo: appendOriginalMobileMemo(firstValue(member.memo, member.메모, member.note, member.비고), normalizedMobile.original, normalizedMobile.mobile),
   };
 }
 
@@ -1189,6 +1189,44 @@ export const billingRouter = router({
       return { status: "success", id: input.id };
     }),
 
+
+  // 다음 달 부과 대상 전체 초기화
+  // 실수로 대량 반영했거나 테스트 데이터를 지우고 처음부터 다시 불러오기 위한 기능이다.
+  // 실제 부과/납부 이력이 연결된 건은 삭제하지 않고 건너뛴다.
+  deleteAllCandidates: publicProcedure
+    .input(z.object({ confirmText: z.literal("전체삭제") }))
+    .mutation(async () => {
+      const candidates = await getBillingCandidates();
+      const list = await candidates;
+      const db = await getDb();
+      if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database not available" });
+
+      let deleted = 0;
+      let skipped = 0;
+      const skippedItems: string[] = [];
+
+      for (const candidate of list as any[]) {
+        const records = await getBillingRecords(candidate.id);
+        if (records.length > 0) {
+          skipped += 1;
+          skippedItems.push(String(candidate.vehicleNo || "") + " " + String(candidate.name || ""));
+          continue;
+        }
+        await db.delete(billingCandidates).where(eq(billingCandidates.id, candidate.id));
+        deleted += 1;
+      }
+
+      await createSyncLog({
+        eventType: "DELETE_ALL",
+        sourceId: "billing_candidates",
+        targetId: "0",
+        status: "SUCCESS",
+        message: "부과 대상 전체 초기화: 삭제 " + deleted + "건, 건너뜀 " + skipped + "건",
+      });
+
+      return { status: "success", deleted, skipped, skippedItems };
+    }),
+
   // 회원관리 자료 불러오기 - 반영 (선택된 rowIndex만 처리)
   applyImport: publicProcedure
     .input(
@@ -1241,7 +1279,7 @@ export const billingRouter = router({
                 // Date 객체 금지: MySQL DATE 컬럼에는 YYYY-MM-DD 문자열만 넣는다.
                 joinDate: billingType === "협회비" ? (toDbDate(row.joinDate) || toDbDate(row.approvalDate)) : undefined,
                 certificateDate: billingType === "관리비" ? toDbDate(row.certificateDate) : undefined,
-                memo: [row.memo, item.billingSource ? `부과기준: ${item.billingSource}` : undefined, item.reason].filter(Boolean).join(" / ") || undefined,
+                memo: appendOriginalMobileMemo([row.memo, item.billingSource ? `부과기준: ${item.billingSource}` : undefined, item.reason].filter(Boolean).join(" / ") || undefined, normalizedMobile.original, normalizedMobile.mobile),
                 memberType: row.memberType,
                 billingType,
                 billingStartMonth,
