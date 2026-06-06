@@ -437,7 +437,6 @@ function normalizeJoinStatus(value: any): string {
 }
 
 function getRawJoinStatus(member: any): string {
-  if (member.__fetchedAsJoined === true) return "가입";
   return normalizeJoinStatus(firstValue(
     member.membership_status,
     member.member_status,
@@ -901,9 +900,34 @@ export const billingRouter = router({
       let closuresCount = 0;
 
       if (input?.includeMembers !== false) {
-        const members = await fetchAllPagedFromMemberSystem(baseUrl, "/api/members?status=%EA%B0%80%EC%9E%85", auth);
+        // 1단계는 회원관리시스템의 개인회원 탭에서 "가입" 상태인 사람만 직접 조회한다.
+        // 회원관리시스템 API 기준:
+        // - status: active/closed/all (폐업 제외용)
+        // - category: 개인/택배
+        // - membership_status: 가입/미가입
+        // 따라서 status=가입 이 아니라 membership_status=가입 을 써야 한다.
+        let members = await fetchAllPagedFromMemberSystem(
+          baseUrl,
+          "/api/members?status=active&category=%EA%B0%9C%EC%9D%B8&membership_status=%EA%B0%80%EC%9E%85",
+          auth
+        );
+
+        // 혹시 배포본에 필터 파라미터가 다르게 동작해 0건이 오면, 전체 active 회원을 읽은 뒤
+        // 미수금 시스템에서 안전하게 개인+가입+배번호 제외 조건으로 필터링한다.
+        if (members.length === 0) {
+          const fallbackMembers = await fetchAllPagedFromMemberSystem(baseUrl, "/api/members?status=active", auth);
+          members = fallbackMembers.filter((member: any) => {
+            const vehicleNo = String(firstValue(member.vehicle_number, member.vehicleNo, member.car_number, member.차량번호) || "");
+            const category = String(firstValue(member.category, member.구분) || "");
+            const membershipStatus = String(firstValue(member.membership_status, member.가입여부, member.status) || "");
+            return !vehicleNo.includes("배")
+              && (category === "개인" || category === "개인회원" || category === "" || !category.includes("택배"))
+              && membershipStatus.includes("가입")
+              && !membershipStatus.includes("미가입");
+          });
+        }
         membersCount = members.length;
-        rows.push(...members.map((member) => mapMemberSystemMemberToImportRow({ ...member, __fetchedAsJoined: true })));
+        rows.push(...members.map(mapMemberSystemMemberToImportRow));
       }
 
       if (input?.includeClosures !== false) {
