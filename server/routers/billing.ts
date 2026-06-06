@@ -220,6 +220,7 @@ interface PreviewClosureItem {
 }
 
 type PreviewItem = PreviewRegisterItem | PreviewClosureItem;
+type ImportMode = "generalFee" | "deliveryManagementFee";
 
 function makeRegisterPreviewItem(params: {
   row: z.infer<typeof registerRowSchema>;
@@ -242,7 +243,7 @@ function makeRegisterPreviewItem(params: {
     category = "중복의심";
     reason = `기존 ID ${duplicateId}와 차량번호/주민번호/부과항목 중복`;
   } else if (params.status === "확인필요") {
-    category = "날짜누락";
+    category = params.reason?.includes("인가일자") ? "확인필요" : "날짜누락";
   } else {
     category = "신규";
   }
@@ -265,8 +266,60 @@ function makeRegisterPreviewItem(params: {
   };
 }
 
-function buildRegisterPreviewItems(row: z.infer<typeof registerRowSchema>, list: any[], nextIndex: () => number): PreviewRegisterItem[] {
+function buildRegisterPreviewItems(
+  row: z.infer<typeof registerRowSchema>,
+  list: any[],
+  nextIndex: () => number,
+  mode: ImportMode = "generalFee"
+): PreviewRegisterItem[] {
   const isBaeVehicle = String(row.vehicleNo || "").includes("배");
+  const joinStatus = String(row.joinStatus || "").trim();
+  const isNonJoined = joinStatus.includes("미가입") || joinStatus.toLowerCase() === "x";
+  const isJoined = !isNonJoined && (joinStatus === "가입" || joinStatus.includes("가입") || !!row.joinDate);
+
+  if (mode === "deliveryManagementFee") {
+    // 2단계 규칙:
+    // 택배/배번호 차량만 본다.
+    // 협회 가입일자가 있거나 가입 상태면 협회비 대상이므로 관리비 추출에서 제외한다.
+    // 가입일자 없음 + 인가일자 + 자격증명발급일자가 있으면 관리비 대상이다.
+    // 부과시작일은 자격증명발급일자 다음 달 같은 날짜다.
+    if (!isBaeVehicle) return [];
+    if (isJoined) return [];
+
+    const hasApprovalDate = !!normalizeDateString(row.approvalDate);
+    const hasCertificateDate = !!normalizeDateString(row.certificateDate);
+    const billingStartDate = hasCertificateDate ? (nextBillingMonth(row.certificateDate) || "") : "";
+
+    if (hasApprovalDate && hasCertificateDate) {
+      return [makeRegisterPreviewItem({
+        row,
+        rowIndex: nextIndex(),
+        list,
+        billingType: "관리비",
+        billingStartMonth: billingStartDate,
+        status: "대기",
+        billingSource: "인가일자+자격증명",
+        reason: "택배 미가입자 인가일자 및 자격증명발급일자 기준 관리비",
+      })];
+    }
+
+    const missingReason = !hasApprovalDate && !hasCertificateDate
+      ? "택배 관리비 인가일자 및 자격증명발급일자 누락"
+      : !hasApprovalDate
+        ? "택배 관리비 인가일자 누락"
+        : "택배 관리비 자격증명발급일자 누락";
+
+    return [makeRegisterPreviewItem({
+      row,
+      rowIndex: nextIndex(),
+      list,
+      billingType: "확인필요",
+      billingStartMonth: "",
+      status: "확인필요",
+      billingSource: "확인필요",
+      reason: missingReason,
+    })];
+  }
 
   // 1단계 확정 규칙:
   // 일반 가입자(배번호 제외)만 협회비 부과대상으로 본다.
@@ -275,11 +328,6 @@ function buildRegisterPreviewItems(row: z.infer<typeof registerRowSchema>, list:
   // 인가일자도 없으면 부과시작일은 비워두되, 확인필요가 아니라 협회비 부과대상으로 유지한다.
   // 배번호/택배/관리비 대상은 이번 1단계에서 완전히 제외한다.
   if (isBaeVehicle) return [];
-
-  const joinStatus = String(row.joinStatus || "").trim();
-  const isJoined = joinStatus === "가입" || joinStatus.includes("가입");
-  const isNonJoined = joinStatus.includes("미가입") || joinStatus.toLowerCase() === "x";
-
   if (isNonJoined) return [];
   if (!isJoined && !row.joinDate && !row.approvalDate) return [];
 
@@ -304,7 +352,7 @@ function buildRegisterPreviewItems(row: z.infer<typeof registerRowSchema>, list:
   })];
 }
 
-async function buildPreview(rows: ImportRow[]): Promise<PreviewItem[]> {
+async function buildPreview(rows: ImportRow[], mode: ImportMode = "generalFee"): Promise<PreviewItem[]> {
   const allCandidates = await getBillingCandidates();
   const list: any[] = await allCandidates;
 
@@ -314,7 +362,7 @@ async function buildPreview(rows: ImportRow[]): Promise<PreviewItem[]> {
 
   for (const row of rows) {
     if (row.type === "REGISTER") {
-      items.push(...buildRegisterPreviewItems(row, list, nextIndex));
+      items.push(...buildRegisterPreviewItems(row, list, nextIndex, mode));
     } else {
       // CLOSURE
       const processDate = row.processDate ? new Date(row.processDate) : null;
@@ -577,27 +625,13 @@ function memberKey(member: any): string {
 function looksLikePersonalCategory(member: any): boolean {
   const category = String(firstValue(member.category, member.member_category, member.memberType, member.구분, member.회원구분) || "").trim();
   if (!category) return true;
-  // 1단계 최종 기준은 "배번호 제외 일반 가입자"다.
-  // 회원관리시스템의 category 값은 배포본/과거자료에 따라 비어있거나 부정확할 수 있으므로
-  // category가 택배로 찍혀도 차량번호에 배가 없으면 일단 일반 후보로 둔다.
-  return true;
+  if (category.includes("택배")) return false;
+  return category.includes("개인") || category.includes("일반") || category === "회원" || category === "개인회원";
 }
 
-function isStep1JoinedGeneralMember(member: any): boolean {
-  const vehicleNo = String(firstValue(member.vehicle_number, member.vehicleNo, member.car_number, member.차량번호) || "").trim();
-  if (!vehicleNo || vehicleNo.includes("배")) return false;
 
-  const rawStatus = getRawJoinStatus(member);
-  const normalizedStatus = rawStatus.toLowerCase();
-  if (rawStatus.includes("미가입") || normalizedStatus === "x" || normalizedStatus === "false" || normalizedStatus === "0") return false;
-
-  // 회원관리시스템 배포본마다 가입 여부 필드명이 달라서 다음 조건 중 하나면 가입자로 본다.
-  // 1) membership_status/가입여부가 가입
-  // 2) 가입일자 계열 필드가 있음
-  // 3) 오래된 가입자 표시값 o/O/ㅇ/○가 있음
-  // 단, 명시적 미가입은 위에서 제외한다.
-  const mapped = mapMemberSystemMemberToImportRow(member) as any;
-  const rawJoinDate = firstValue(
+function getRawJoinDateCandidate(member: any): any {
+  return firstValue(
     member.membership_date, member.membershipDate,
     member.membership_join_date, member.membershipJoinDate,
     member.association_membership_date, member.associationMembershipDate,
@@ -608,6 +642,41 @@ function isStep1JoinedGeneralMember(member: any): boolean {
     member.registration_date, member.registrationDate,
     member.가입일자, member.가입일, member.가입날짜, member.협회가입일자, member.회원가입일자
   );
+}
+
+function isStep2DeliveryManagementMember(member: any): boolean {
+  const vehicleNo = String(firstValue(member.vehicle_number, member.vehicleNo, member.car_number, member.차량번호) || "").trim();
+  if (!vehicleNo || !vehicleNo.includes("배")) return false;
+
+  const rawStatus = getRawJoinStatus(member);
+  const normalizedStatus = rawStatus.toLowerCase();
+  const rawJoinDate = getRawJoinDateCandidate(member);
+  const hasJoinDate = !!normalizeDateString(rawJoinDate) || isJoinMarker(rawJoinDate);
+  const isNonJoined = rawStatus.includes("미가입") || normalizedStatus === "x" || normalizedStatus === "false" || normalizedStatus === "0";
+  const isJoined = !isNonJoined && (rawStatus.includes("가입") || hasJoinDate);
+
+  // 협회 가입자 택배는 협회비 대상이므로 2단계 관리비 추출에서 제외한다.
+  if (isJoined) return false;
+
+  // 배번호이면서 협회 가입자가 아니면 관리비 후보 또는 확인필요 후보로 미리보기한다.
+  return true;
+}
+
+function isStep1JoinedGeneralMember(member: any): boolean {
+  const vehicleNo = String(firstValue(member.vehicle_number, member.vehicleNo, member.car_number, member.차량번호) || "").trim();
+  if (!vehicleNo || vehicleNo.includes("배")) return false;
+  if (!looksLikePersonalCategory(member)) return false;
+
+  const rawStatus = getRawJoinStatus(member);
+  const normalizedStatus = rawStatus.toLowerCase();
+  if (rawStatus.includes("미가입") || normalizedStatus === "x" || normalizedStatus === "false" || normalizedStatus === "0") return false;
+
+  // 회원관리시스템 배포본마다 가입 여부 필드명이 달라서 다음 조건 중 하나면 가입자로 본다.
+  // 1) membership_status/가입여부가 가입
+  // 2) 가입일자 계열 필드가 있음
+  // 단, 명시적 미가입은 위에서 제외한다.
+  const mapped = mapMemberSystemMemberToImportRow(member) as any;
+  const rawJoinDate = getRawJoinDateCandidate(member);
   return rawStatus.includes("가입") || !!mapped.joinDate || isJoinMarker(rawJoinDate);
 }
 
@@ -963,6 +1032,7 @@ export const billingRouter = router({
       z.object({
         includeMembers: z.boolean().optional().default(true),
         includeClosures: z.boolean().optional().default(false),
+        step: z.enum(["generalFee", "deliveryManagementFee"]).optional().default("generalFee"),
       }).optional()
     )
     .mutation(async ({ input }) => {
@@ -980,32 +1050,43 @@ export const billingRouter = router({
       let closuresCount = 0;
 
       if (input?.includeMembers !== false) {
-        // 1단계는 회원관리시스템 개인/일반 가입자 중 배번호 제외 차량만 협회비 후보로 본다.
-        // 회원관리시스템 API 필터가 일부 과거자료를 누락할 수 있으므로,
-        // 여러 조회 결과를 합친 뒤 미수금 시스템에서 최종 필터링한다.
-        const joinedFiltered = await fetchAllPagedFromMemberSystem(
-          baseUrl,
-          "/api/members?status=active&category=%EA%B0%9C%EC%9D%B8&membership_status=%EA%B0%80%EC%9E%85",
-          auth
-        );
-        const personalAll = await fetchAllPagedFromMemberSystem(
-          baseUrl,
-          "/api/members?status=active&category=%EA%B0%9C%EC%9D%B8",
-          auth
-        );
-        const activeAll = await fetchAllPagedFromMemberSystem(baseUrl, "/api/members?status=active", auth);
-        const allMembers = await fetchAllPagedFromMemberSystem(baseUrl, "/api/members", auth);
-        const personalNoStatus = await fetchAllPagedFromMemberSystem(
-          baseUrl,
-          "/api/members?category=%EA%B0%9C%EC%9D%B8",
-          auth
-        );
+        const step = input?.step || "generalFee";
+        if (step === "deliveryManagementFee") {
+          // 2단계: 택배 관리비 후보 추출.
+          // 배포본마다 category/필터 동작이 달라서 택배 필터 + active 전체를 합친 뒤 최종 필터링한다.
+          const deliveryFiltered = await fetchAllPagedFromMemberSystem(
+            baseUrl,
+            "/api/members?status=active&category=%ED%83%9D%EB%B0%B0",
+            auth
+          );
+          const activeAll = await fetchAllPagedFromMemberSystem(baseUrl, "/api/members?status=active", auth);
+          const mergedMembers = mergeMembers(deliveryFiltered, activeAll);
+          const members = mergedMembers.filter(isStep2DeliveryManagementMember);
 
-        const mergedMembers = mergeMembers(joinedFiltered, personalAll, activeAll, allMembers, personalNoStatus);
-        const members = mergedMembers.filter(isStep1JoinedGeneralMember);
+          membersCount = members.length;
+          rows.push(...members.map(mapMemberSystemMemberToImportRow));
+        } else {
+          // 1단계: 회원관리시스템의 개인회원 탭에서 가입 상태인 일반 차량만 조회한다.
+          // 일부 배포본은 membership_status 필터가 일부만 반환하므로,
+          // 필터 조회 + 개인 전체 조회 + active 전체 조회를 합친 뒤 미수금 시스템에서 최종 필터링한다.
+          const joinedFiltered = await fetchAllPagedFromMemberSystem(
+            baseUrl,
+            "/api/members?status=active&category=%EA%B0%9C%EC%9D%B8&membership_status=%EA%B0%80%EC%9E%85",
+            auth
+          );
+          const personalAll = await fetchAllPagedFromMemberSystem(
+            baseUrl,
+            "/api/members?status=active&category=%EA%B0%9C%EC%9D%B8",
+            auth
+          );
+          const activeAll = await fetchAllPagedFromMemberSystem(baseUrl, "/api/members?status=active", auth);
 
-        membersCount = members.length;
-        rows.push(...members.map(mapMemberSystemMemberToImportRow));
+          const mergedMembers = mergeMembers(joinedFiltered, personalAll, activeAll);
+          const members = mergedMembers.filter(isStep1JoinedGeneralMember);
+
+          membersCount = members.length;
+          rows.push(...members.map(mapMemberSystemMemberToImportRow));
+        }
       }
 
       if (input?.includeClosures !== false) {
@@ -1014,7 +1095,7 @@ export const billingRouter = router({
         rows.push(...closures.map(mapMemberSystemClosureToImportRow));
       }
 
-      const items = await buildPreview(rows);
+      const items = await buildPreview(rows, input?.step || "generalFee");
       return {
         rows,
         items,
@@ -1030,9 +1111,9 @@ export const billingRouter = router({
 
   // 회원관리 자료 불러오기 - 미리보기 (DB 쓰기 없음)
   previewImport: publicProcedure
-    .input(z.object({ rows: z.array(importRowSchema) }))
+    .input(z.object({ rows: z.array(importRowSchema), step: z.enum(["generalFee", "deliveryManagementFee"]).optional().default("generalFee") }))
     .mutation(async ({ input }) => {
-      const items = await buildPreview(input.rows);
+      const items = await buildPreview(input.rows, input.step);
       return { items };
     }),
 
@@ -1042,10 +1123,11 @@ export const billingRouter = router({
       z.object({
         rows: z.array(importRowSchema),
         selectedIndexes: z.array(z.number()),
+        step: z.enum(["generalFee", "deliveryManagementFee"]).optional().default("generalFee"),
       })
     )
     .mutation(async ({ input }) => {
-      const preview = await buildPreview(input.rows);
+      const preview = await buildPreview(input.rows, input.step);
       const selected = preview.filter((item) => input.selectedIndexes.includes(item.rowIndex));
 
       const results: { rowIndex: number; status: string; message: string }[] = [];

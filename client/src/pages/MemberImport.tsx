@@ -54,6 +54,8 @@ type ClosureRow = {
 
 type ImportRow = RegisterRow | ClosureRow;
 
+type DirectFetchStep = "generalFee" | "deliveryManagementFee";
+
 type PreviewItem = {
   rowIndex: number;
   type: "REGISTER" | "CLOSURE";
@@ -151,6 +153,7 @@ export default function MemberImport() {
   const [preview, setPreview] = useState<PreviewItem[] | null>(null);
   const [currentRows, setCurrentRows] = useState<ImportRow[] | null>(null);
   const [previewSource, setPreviewSource] = useState<"manual" | "member-system" | null>(null);
+  const [directFetchStep, setDirectFetchStep] = useState<DirectFetchStep>("generalFee");
   const [memberSystemSummary, setMemberSystemSummary] = useState<{
     membersCount: number;
     closuresCount: number;
@@ -245,7 +248,7 @@ export default function MemberImport() {
     setCurrentRows(rows);
     setPreviewSource("manual");
     setMemberSystemSummary(null);
-    previewMutation.mutate({ rows });
+    previewMutation.mutate({ rows, step: "generalFee" });
   };
 
   const toggleRow = (idx: number) => {
@@ -266,14 +269,15 @@ export default function MemberImport() {
     }
   };
 
-  const handleFetchFromMemberSystem = () => {
+  const handleFetchFromMemberSystem = (step: DirectFetchStep) => {
     setParseError(null);
     setApplyResult(null);
     setPreview(null);
     setCurrentRows(null);
     setPreviewSource(null);
     setMemberSystemSummary(null);
-    memberSystemPreviewMutation.mutate({ includeMembers: true, includeClosures: false });
+    setDirectFetchStep(step);
+    memberSystemPreviewMutation.mutate({ includeMembers: true, includeClosures: false, step });
   };
 
   const handleApply = () => {
@@ -293,7 +297,7 @@ export default function MemberImport() {
         return;
       }
     }
-    applyMutation.mutate({ rows, selectedIndexes: Array.from(selectedIndexes) });
+    applyMutation.mutate({ rows, selectedIndexes: Array.from(selectedIndexes), step: previewSource === "member-system" ? directFetchStep : "generalFee" });
   };
 
   // summary counts
@@ -349,30 +353,45 @@ export default function MemberImport() {
         <CardContent className="px-5 py-4 space-y-3">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
             <div>
-              <p className="text-sm text-slate-700 font-medium">1단계: 회원관리시스템에서 신규 회원 자료만 읽어와 협회비/관리비 대상을 미리보기합니다.</p>
+              <p className="text-sm text-slate-700 font-medium">회원관리시스템에서 단계별 부과대상자를 미리보기합니다.</p>
               <p className="text-xs text-slate-500 mt-1">
-                이 단계는 읽기 전용입니다. 회원관리시스템의 자료는 절대 수정하지 않고, 직접 연결 자료는 기본 선택 해제 상태로 표시됩니다.
+                1단계는 일반 가입자 협회비, 2단계는 택배 미가입자 관리비입니다. 회원관리시스템은 읽기 전용이며 기본 선택 해제 상태로 표시됩니다.
               </p>
             </div>
-            <Button
-              onClick={handleFetchFromMemberSystem}
-              disabled={memberSystemPreviewMutation.isPending}
-              className="bg-indigo-600 hover:bg-indigo-700 gap-1.5 whitespace-nowrap"
-            >
-              {memberSystemPreviewMutation.isPending ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <RefreshCw className="w-3.5 h-3.5" />
-              )}
-              {memberSystemPreviewMutation.isPending ? "불러오는 중..." : "회원관리시스템에서 불러오기"}
-            </Button>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Button
+                onClick={() => handleFetchFromMemberSystem("generalFee")}
+                disabled={memberSystemPreviewMutation.isPending}
+                className="bg-indigo-600 hover:bg-indigo-700 gap-1.5 whitespace-nowrap"
+              >
+                {memberSystemPreviewMutation.isPending && directFetchStep === "generalFee" ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-3.5 h-3.5" />
+                )}
+                1단계 일반 협회비 불러오기
+              </Button>
+              <Button
+                onClick={() => handleFetchFromMemberSystem("deliveryManagementFee")}
+                disabled={memberSystemPreviewMutation.isPending}
+                variant="outline"
+                className="gap-1.5 whitespace-nowrap border-violet-200 text-violet-700 hover:bg-violet-50"
+              >
+                {memberSystemPreviewMutation.isPending && directFetchStep === "deliveryManagementFee" ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-3.5 h-3.5" />
+                )}
+                2단계 택배 관리비 불러오기
+              </Button>
+            </div>
           </div>
           <div className="text-xs text-slate-400 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
             필요 환경변수: <span className="font-mono text-slate-600">MEMBER_SYSTEM_BASE_URL</span>, <span className="font-mono text-slate-600">MEMBER_SYSTEM_USERNAME</span>, <span className="font-mono text-slate-600">MEMBER_SYSTEM_PASSWORD</span>
           </div>
           {memberSystemSummary && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">회원 {memberSystemSummary.membersCount}건</div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">{directFetchStep === "generalFee" ? "일반 협회비" : "택배 관리비"} {memberSystemSummary.membersCount}건</div>
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">폐업·양도·이관 {memberSystemSummary.closuresCount}건 <span className="text-slate-400">(1단계 제외)</span></div>
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 truncate">출처 {memberSystemSummary.baseUrl}</div>
             </div>
