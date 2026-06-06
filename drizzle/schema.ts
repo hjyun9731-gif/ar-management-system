@@ -6,12 +6,7 @@ import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, decimal, date } f
  * Columns use camelCase to match both database fields and generated types.
  */
 export const users = mysqlTable("users", {
-  /**
-   * Surrogate primary key. Auto-incremented numeric value managed by the database.
-   * Use this for relations between tables.
-   */
   id: int("id").autoincrement().primaryKey(),
-  /** Manus OAuth identifier (openId) returned from the OAuth callback. Unique per user. */
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
   email: varchar("email", { length: 320 }),
@@ -48,7 +43,8 @@ export const billingCandidates = mysqlTable("billing_candidates", {
   memo: text("memo"),
   memberType: varchar("member_type", { length: 20 }).notNull(), // 개인회원, 택배회원
   billingType: varchar("billing_type", { length: 20 }).notNull(), // 협회비, 관리비
-  billingStartMonth: varchar("billing_start_month", { length: 7 }).notNull(), // YYYY-MM
+  // 기존 length 7(YYYY-MM)로는 2018-11-24 같은 부과시작일 저장 시 MySQL insert 실패.
+  billingStartMonth: varchar("billing_start_month", { length: 10 }).notNull(), // YYYY-MM-DD 또는 빈값
   status: varchar("status", { length: 20 }).default("대기").notNull(), // 대기, 부과예정, 부과반영완료, 확인필요, 보류, 제외
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
@@ -68,7 +64,7 @@ export const closureEvents = mysqlTable("closure_events", {
   name: varchar("name", { length: 100 }).notNull(),
   receiptDate: date("receipt_date"),
   processDate: date("process_date").notNull(),
-  excludeStartMonth: varchar("exclude_start_month", { length: 7 }).notNull(), // YYYY-MM
+  excludeStartMonth: varchar("exclude_start_month", { length: 10 }).notNull(), // YYYY-MM-DD 또는 YYYY-MM
   unpaidAmountAtClosure: int("unpaid_amount_at_closure").default(0),
   reflectStatus: varchar("reflect_status", { length: 20 }).default("확인필요").notNull(), // 반영완료, 미수금있음, 확인필요, 보류
   memo: text("memo"),
