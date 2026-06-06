@@ -542,7 +542,7 @@ export default function MemberImport() {
                       <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">성명</TableHead>
                       <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">카테고리</TableHead>
                       <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">부과항목</TableHead>
-                      <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">부과시작월 / 제외시작월</TableHead>
+                      <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">부과시작일 / 제외시작일</TableHead>
                       <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide pr-5">비고</TableHead>
                     </TableRow>
                   </TableHeader>

@@ -14,13 +14,24 @@ import {
 } from "../db";
 import { TRPCError } from "@trpc/server";
 
-// 부과시작월 자동 계산 함수
+// 부과시작일 자동 계산 함수
+// 기준일의 다음 달 같은 날짜부터 부과한다.
+// 예: 2026-05-15 -> 2026-06-15
+// 말일 보정: 2026-01-31 -> 2026-02-28
 function nextBillingMonth(base?: string | Date): string | null {
   if (!base) return null;
   const baseDate = new Date(base);
   if (Number.isNaN(baseDate.getTime())) return null;
-  const nextMonth = new Date(baseDate.getFullYear(), baseDate.getMonth() + 1, 1);
-  return `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}`;
+
+  const year = baseDate.getFullYear();
+  const month = baseDate.getMonth();
+  const day = baseDate.getDate();
+  const targetYear = month === 11 ? year + 1 : year;
+  const targetMonth = month === 11 ? 0 : month + 1;
+  const lastDayOfTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+  const targetDay = Math.min(day, lastDayOfTargetMonth);
+
+  return `${targetYear}-${String(targetMonth + 1).padStart(2, "0")}-${String(targetDay).padStart(2, "0")}`;
 }
 
 // 레거시 연동용: 단일 부과항목 계산
@@ -530,7 +541,7 @@ export const billingRouter = router({
           };
         }
 
-        // 부과시작월 계산
+        // 부과시작일 계산
         const billingStartMonth = calculateBillingStartMonth(
           input.memberType,
           input.joinDate,
@@ -568,7 +579,7 @@ export const billingRouter = router({
           memo: input.memo,
           memberType: input.memberType,
           billingType,
-          billingStartMonth: billingStartMonth || "",  // 부과시작월 없으면 빈 문자열
+          billingStartMonth: billingStartMonth || "",  // 부과시작일 없으면 빈 문자열
           status: determinedStatus,
         });
 
@@ -578,7 +589,7 @@ export const billingRouter = router({
         const logMessage =
           determinedStatus === "확인필요"
             ? `필수 정보 부족 - ${input.memberType === "개인회원" ? "joinDate" : "certificateDate"} 확인 필요`
-            : `${billingType} 대상자로 등록 (부과시작월: ${billingStartMonth})`;
+            : `${billingType} 대상자로 등록 (부과시작일: ${billingStartMonth})`;
 
         await createSyncLog({
           eventType: "REGISTER",
@@ -593,7 +604,7 @@ export const billingRouter = router({
           message:
             determinedStatus === "확인필요"
               ? `필수 정보 부족으로 확인필요 상태로 등록되었습니다.`
-              : `${billingType} 대상자로 등록되었습니다. (부과시작월: ${billingStartMonth})`,
+              : `${billingType} 대상자로 등록되었습니다. (부과시작일: ${billingStartMonth})`,
           candidateId,
         };
       } catch (error) {
@@ -924,7 +935,7 @@ export const billingRouter = router({
                 status: status === "확인필요" ? "WARNING" : "SUCCESS",
                 message: status === "확인필요"
                   ? (item.reason || "필수 날짜 누락")
-                  : `${billingType} 대상자 등록 (부과시작월: ${billingStartMonth}, 기준: ${item.billingSource || "-"})`,
+                  : `${billingType} 대상자 등록 (부과시작일: ${billingStartMonth}, 기준: ${item.billingSource || "-"})`,
               });
               results.push({ rowIndex: item.rowIndex, status: "success", message: `${billingType} 등록 완료` });
             }
