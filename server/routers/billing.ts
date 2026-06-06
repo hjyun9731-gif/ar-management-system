@@ -15,27 +15,29 @@ import {
 import { TRPCError } from "@trpc/server";
 
 // 부과시작월 자동 계산 함수
-// 택배회원: certificateDate 기준 다음 달
-// 개인회원: joinDate 기준 다음 달
+function nextBillingMonth(base?: string | Date): string | null {
+  if (!base) return null;
+  const baseDate = new Date(base);
+  if (Number.isNaN(baseDate.getTime())) return null;
+  const nextMonth = new Date(baseDate.getFullYear(), baseDate.getMonth() + 1, 1);
+  return `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}`;
+}
+
+// 레거시 연동용: 단일 부과항목 계산
+// 실제 불러오기/미리보기는 buildRegisterPreviewItems에서 업무 기준에 따라 1개 부과항목만 생성한다.
 function calculateBillingStartMonth(
   memberType: string,
   joinDate?: string | Date,
-  certificateDate?: string | Date
+  certificateDate?: string | Date,
+  approvalDate?: string | Date,
+  billingType?: string
 ): string | null {
-  let baseDate: Date | null = null;
+  if (billingType === "협회비") return nextBillingMonth(joinDate);
+  if (billingType === "관리비") return nextBillingMonth(certificateDate);
 
-  if (memberType === "택배회원" && certificateDate) {
-    baseDate = new Date(certificateDate);
-  } else if (memberType === "개인회원" && joinDate) {
-    baseDate = new Date(joinDate);
-  }
-
-  if (!baseDate) {
-    return null; // 필수 날짜 없음
-  }
-
-  const nextMonth = new Date(baseDate.getFullYear(), baseDate.getMonth() + 1, 1);
-  return `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}`;
+  if (joinDate) return nextBillingMonth(joinDate);
+  if (memberType === "택배회원" && approvalDate && certificateDate) return nextBillingMonth(certificateDate);
+  return null;
 }
 
 // 중복 체크 함수
@@ -43,56 +45,64 @@ async function checkDuplicate(data: {
   rrn?: string;
   vehicleNo: string;
   name: string;
+  billingType?: string;
 }): Promise<number | null> {
   const candidates = await getBillingCandidates();
   const list = await candidates;
 
-  // 1순위: 주민등록번호
+  const sameBillingType = (c: any) => !data.billingType || !c.billingType || c.billingType === data.billingType;
+
+  // 1순위: 주민등록번호 + 부과항목
   if (data.rrn) {
-    const found = list.find((c: any) => c.rrn === data.rrn);
+    const found = list.find((c: any) => c.rrn === data.rrn && sameBillingType(c));
     if (found) return found.id;
   }
 
-  // 2순위: 차량번호
-  const vehicleMatch = list.find((c: any) => c.vehicleNo === data.vehicleNo);
+  // 2순위: 차량번호 + 부과항목
+  const vehicleMatch = list.find((c: any) => c.vehicleNo === data.vehicleNo && sameBillingType(c));
   if (vehicleMatch) return vehicleMatch.id;
 
-  // 3순위: 성명 + 차량번호 뒤 4자리
+  // 3순위: 성명 + 차량번호 뒤 4자리 + 부과항목
   const vehicleLast4 = data.vehicleNo.slice(-4);
   const nameVehicleMatch = list.find(
-    (c: any) => c.name === data.name && c.vehicleNo.slice(-4) === vehicleLast4
+    (c: any) => c.name === data.name && c.vehicleNo.slice(-4) === vehicleLast4 && sameBillingType(c)
   );
   if (nameVehicleMatch) return nameVehicleMatch.id;
 
   return null;
 }
 
-// 부과항목 결정 함수
-// 택배회원: certificateDate 존재 시만 관리비
-// 개인회원: joinDate 존재 시만 협회비
-// 필수 날짜 없으면 확인필요
+// 부과항목 결정 함수 (레거시 단일 등록용)
+// 일반/개인/택배 모두 가입일자가 있으면 협회비를 우선한다.
+// 택배회원도 가입일자가 있으면 관리비가 아니라 협회비로 본다.
+// 택배회원 중 가입일자가 없고 인가일자+자격증명발급일자가 모두 있을 때만 관리비 대상이다.
 function determineBillingType(
   memberType: string,
   joinDate?: string | Date,
-  certificateDate?: string | Date
+  certificateDate?: string | Date,
+  approvalDate?: string | Date
 ): { billingType: string; status: string } {
-  if (memberType === "개인회원") {
-    if (joinDate) {
-      return { billingType: "협회비", status: "대기" };
-    } else {
-      return { billingType: "확인필요", status: "확인필요" };
-    }
-  }
-
-  if (memberType === "택배회원") {
-    if (certificateDate) {
-      return { billingType: "관리비", status: "대기" };
-    } else {
-      return { billingType: "확인필요", status: "확인필요" };
-    }
-  }
-
+  if (joinDate) return { billingType: "협회비", status: "대기" };
+  if (memberType === "택배회원" && approvalDate && certificateDate) return { billingType: "관리비", status: "대기" };
   return { billingType: "확인필요", status: "확인필요" };
+}
+
+function hasValue(value?: string | Date): boolean {
+  if (!value) return false;
+  return String(value).trim().length > 0;
+}
+
+function findDuplicateForBillingType(list: any[], row: { rrn?: string; vehicleNo: string; name: string }, billingType: string): number | undefined {
+  const sameBillingType = (c: any) => !c.billingType || c.billingType === billingType;
+  if (row.rrn) {
+    const found = list.find((c: any) => c.rrn === row.rrn && sameBillingType(c));
+    if (found) return found.id;
+  }
+  const vehicleMatch = list.find((c: any) => c.vehicleNo === row.vehicleNo && sameBillingType(c));
+  if (vehicleMatch) return vehicleMatch.id;
+  const last4 = row.vehicleNo.slice(-4);
+  const nameVehicleMatch = list.find((c: any) => c.name === row.name && c.vehicleNo.slice(-4) === last4 && sameBillingType(c));
+  return nameVehicleMatch?.id;
 }
 
 // ---- Import preview / apply types ----
@@ -106,8 +116,9 @@ const registerRowSchema = z.object({
   name: z.string(),
   rrn: z.string().optional(),
   mobile: z.string().optional(),
-  memberType: z.enum(["개인회원", "택배회원"]),
+  memberType: z.enum(["개인회원", "택배회원", "일반회원"]).transform((v) => v === "일반회원" ? "개인회원" : v),
   joinDate: z.string().optional(),
+  approvalDate: z.string().optional(),
   certificateDate: z.string().optional(),
   vehicleType: z.string().optional(),
   businessNo: z.string().optional(),
@@ -142,6 +153,7 @@ interface PreviewRegisterItem {
   billingType: string;
   billingStartMonth: string;
   status: string;
+  billingSource?: "가입일자" | "인가일자+자격증명" | "확인필요";
   duplicateId?: number;
   reason?: string;
   raw: z.infer<typeof registerRowSchema>;
@@ -163,64 +175,133 @@ interface PreviewClosureItem {
 
 type PreviewItem = PreviewRegisterItem | PreviewClosureItem;
 
+function makeRegisterPreviewItem(params: {
+  row: z.infer<typeof registerRowSchema>;
+  rowIndex: number;
+  list: any[];
+  billingType: "협회비" | "관리비" | "확인필요";
+  billingStartMonth: string;
+  status: string;
+  billingSource: "가입일자" | "인가일자+자격증명" | "확인필요";
+  reason?: string;
+}): PreviewRegisterItem {
+  const duplicateId = params.billingType === "확인필요"
+    ? undefined
+    : findDuplicateForBillingType(params.list, params.row, params.billingType);
+
+  let category: PreviewRegisterItem["category"];
+  let reason = params.reason;
+
+  if (duplicateId) {
+    category = "중복의심";
+    reason = `기존 ID ${duplicateId}와 차량번호/주민번호/부과항목 중복`;
+  } else if (params.status === "확인필요") {
+    category = "날짜누락";
+  } else {
+    category = "신규";
+  }
+
+  return {
+    rowIndex: params.rowIndex,
+    type: "REGISTER",
+    category,
+    sourceSystemId: params.billingType === "확인필요" ? params.row.sourceSystemId : `${params.row.sourceSystemId}-${params.billingType}`,
+    vehicleNo: params.row.vehicleNo,
+    name: params.row.name,
+    memberType: params.row.memberType,
+    billingType: params.billingType,
+    billingStartMonth: params.billingStartMonth,
+    status: params.status,
+    billingSource: params.billingSource,
+    duplicateId,
+    reason,
+    raw: params.row,
+  };
+}
+
+function buildRegisterPreviewItems(row: z.infer<typeof registerRowSchema>, list: any[], nextIndex: () => number): PreviewRegisterItem[] {
+  const items: PreviewRegisterItem[] = [];
+
+  // 1) 일반/개인/택배 모두 가입일자가 있으면 협회비 대상이다.
+  //    택배회원도 가입일자가 있으면 관리비가 아니라 협회비로만 본다.
+  if (hasValue(row.joinDate)) {
+    items.push(makeRegisterPreviewItem({
+      row,
+      rowIndex: nextIndex(),
+      list,
+      billingType: "협회비",
+      billingStartMonth: nextBillingMonth(row.joinDate) || "",
+      status: "대기",
+      billingSource: "가입일자",
+      reason: row.memberType === "택배회원" ? "택배회원 가입일자 기준 협회비" : "가입일자 기준 협회비",
+    }));
+    return items;
+  }
+
+  // 2) 택배회원은 가입일자가 없고 인가일자 + 자격증명발급일자가 모두 있을 때만 관리비 대상이다.
+  if (row.memberType === "택배회원") {
+    const hasApproval = hasValue(row.approvalDate);
+    const hasCertificate = hasValue(row.certificateDate);
+
+    if (hasApproval && hasCertificate) {
+      items.push(makeRegisterPreviewItem({
+        row,
+        rowIndex: nextIndex(),
+        list,
+        billingType: "관리비",
+        billingStartMonth: nextBillingMonth(row.certificateDate) || "",
+        status: "대기",
+        billingSource: "인가일자+자격증명",
+        reason: "가입일자 없음 / 인가일자 및 자격증명발급일자 기준 관리비",
+      }));
+      return items;
+    }
+
+    if (hasApproval || hasCertificate) {
+      const missing = !hasApproval ? "인가일자 누락" : "자격증명발급일자 누락";
+      items.push(makeRegisterPreviewItem({
+        row,
+        rowIndex: nextIndex(),
+        list,
+        billingType: "확인필요",
+        billingStartMonth: "",
+        status: "확인필요",
+        billingSource: "확인필요",
+        reason: `가입일자 없음 / 택배 관리비 ${missing}`,
+      }));
+      return items;
+    }
+  }
+
+  // 3) 아무 부과항목도 만들 수 없으면 확인필요
+  const reason = row.memberType === "택배회원"
+    ? "가입일자 없음 / 인가일자·자격증명발급일자 부족"
+    : "가입일자 누락";
+  items.push(makeRegisterPreviewItem({
+    row,
+    rowIndex: nextIndex(),
+    list,
+    billingType: "확인필요",
+    billingStartMonth: "",
+    status: "확인필요",
+    billingSource: "확인필요",
+    reason,
+  }));
+
+  return items;
+}
+
 async function buildPreview(rows: ImportRow[]): Promise<PreviewItem[]> {
   const allCandidates = await getBillingCandidates();
   const list: any[] = await allCandidates;
 
   const items: PreviewItem[] = [];
+  let previewIndex = 0;
+  const nextIndex = () => previewIndex++;
 
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-
+  for (const row of rows) {
     if (row.type === "REGISTER") {
-      // duplicate check
-      let duplicateId: number | undefined;
-      if (row.rrn) {
-        const found = list.find((c: any) => c.rrn === row.rrn);
-        if (found) duplicateId = found.id;
-      }
-      if (!duplicateId) {
-        const found = list.find((c: any) => c.vehicleNo === row.vehicleNo);
-        if (found) duplicateId = found.id;
-      }
-      if (!duplicateId) {
-        const last4 = row.vehicleNo.slice(-4);
-        const found = list.find((c: any) => c.name === row.name && c.vehicleNo.slice(-4) === last4);
-        if (found) duplicateId = found.id;
-      }
-
-      const billingStartMonth = calculateBillingStartMonth(row.memberType, row.joinDate, row.certificateDate);
-      const { billingType, status } = determineBillingType(row.memberType, row.joinDate, row.certificateDate);
-
-      let category: PreviewRegisterItem["category"];
-      let reason: string | undefined;
-
-      if (duplicateId) {
-        category = "중복의심";
-        reason = `기존 ID ${duplicateId}와 차량번호/주민번호 중복`;
-      } else if (status === "확인필요") {
-        const missing = row.memberType === "개인회원" ? "joinDate" : "certificateDate";
-        category = "날짜누락";
-        reason = `${missing} 누락`;
-      } else {
-        category = "신규";
-      }
-
-      items.push({
-        rowIndex: i,
-        type: "REGISTER",
-        category,
-        sourceSystemId: row.sourceSystemId,
-        vehicleNo: row.vehicleNo,
-        name: row.name,
-        memberType: row.memberType,
-        billingType,
-        billingStartMonth: billingStartMonth || "",
-        status,
-        duplicateId,
-        reason,
-        raw: row,
-      });
+      items.push(...buildRegisterPreviewItems(row, list, nextIndex));
     } else {
       // CLOSURE
       const processDate = row.processDate ? new Date(row.processDate) : null;
@@ -238,7 +319,7 @@ async function buildPreview(rows: ImportRow[]): Promise<PreviewItem[]> {
       );
 
       items.push({
-        rowIndex: i,
+        rowIndex: nextIndex(),
         type: "CLOSURE",
         category: hasValidProcessDate ? "폐업양도이관" : "확인필요",
         sourceSystemId: row.sourceSystemId,
@@ -366,6 +447,7 @@ function mapMemberSystemMemberToImportRow(member: any): ImportRow {
     mobile: member.mobile || undefined,
     memberType: mapMemberType(member.category, vehicleNo),
     joinDate: toDateString(member.membership_date || member.joinDate),
+    approvalDate: toDateString(member.approval_date || member.approvalDate),
     certificateDate: toDateString(member.certificate_issue_date || member.certificateDate),
     vehicleType: member.vehicle_type || undefined,
     businessNo: member.business_number || undefined,
@@ -452,14 +534,16 @@ export const billingRouter = router({
         const billingStartMonth = calculateBillingStartMonth(
           input.memberType,
           input.joinDate,
-          input.certificateDate
+          input.certificateDate,
+          input.approvalDate
         );
 
         // 부과항목 결정
         const { billingType, status: determinedStatus } = determineBillingType(
           input.memberType,
           input.joinDate,
-          input.certificateDate
+          input.certificateDate,
+          input.approvalDate
         );
 
         // 신규 대상자 생성
@@ -726,7 +810,7 @@ export const billingRouter = router({
     .input(
       z.object({
         includeMembers: z.boolean().optional().default(true),
-        includeClosures: z.boolean().optional().default(true),
+        includeClosures: z.boolean().optional().default(false),
       }).optional()
     )
     .mutation(async ({ input }) => {
@@ -799,21 +883,22 @@ export const billingRouter = router({
             if (item.duplicateId) {
               await updateBillingCandidate(item.duplicateId, {
                 status: "확인필요",
-                memo: `중복 데이터(불러오기): ${row.sourceSystemId}`,
+                memo: `중복 데이터(불러오기): ${item.sourceSystemId}`,
               });
               await createSyncLog({
                 eventType: "IMPORT",
-                sourceId: row.sourceSystemId,
+                sourceId: item.sourceSystemId,
                 targetId: String(item.duplicateId),
                 status: "WARNING",
                 message: "중복 데이터 - 확인필요 상태로 변경",
               });
               results.push({ rowIndex: item.rowIndex, status: "warning", message: "중복 - 확인필요 처리" });
             } else {
-              const billingStartMonth = calculateBillingStartMonth(row.memberType, row.joinDate, row.certificateDate);
-              const { billingType, status } = determineBillingType(row.memberType, row.joinDate, row.certificateDate);
+              const billingType = item.billingType || "확인필요";
+              const status = item.status || "확인필요";
+              const billingStartMonth = item.billingStartMonth || "";
               const result: any = await createBillingCandidate({
-                sourceSystemId: row.sourceSystemId,
+                sourceSystemId: item.sourceSystemId,
                 managementNo: row.managementNo,
                 region: row.region,
                 vehicleNo: row.vehicleNo,
@@ -825,21 +910,21 @@ export const billingRouter = router({
                 company: row.company,
                 joinDate: row.joinDate ? new Date(row.joinDate) : undefined,
                 certificateDate: row.certificateDate ? new Date(row.certificateDate) : undefined,
-                memo: row.memo,
+                memo: [row.memo, item.billingSource ? `부과기준: ${item.billingSource}` : undefined, item.reason].filter(Boolean).join(" / ") || undefined,
                 memberType: row.memberType,
                 billingType,
-                billingStartMonth: billingStartMonth || "",
+                billingStartMonth,
                 status,
               });
               const candidateId = result?.insertId || 0;
               await createSyncLog({
                 eventType: "IMPORT",
-                sourceId: row.sourceSystemId,
+                sourceId: item.sourceSystemId,
                 targetId: String(candidateId),
                 status: status === "확인필요" ? "WARNING" : "SUCCESS",
                 message: status === "확인필요"
-                  ? `필수 날짜 누락 (${row.memberType === "개인회원" ? "joinDate" : "certificateDate"})`
-                  : `${billingType} 대상자 등록 (부과시작월: ${billingStartMonth})`,
+                  ? (item.reason || "필수 날짜 누락")
+                  : `${billingType} 대상자 등록 (부과시작월: ${billingStartMonth}, 기준: ${item.billingSource || "-"})`,
               });
               results.push({ rowIndex: item.rowIndex, status: "success", message: `${billingType} 등록 완료` });
             }

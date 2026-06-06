@@ -32,6 +32,7 @@ type RegisterRow = {
   mobile?: string;
   memberType: "개인회원" | "택배회원";
   joinDate?: string;
+  approvalDate?: string;
   certificateDate?: string;
   vehicleType?: string;
   businessNo?: string;
@@ -64,6 +65,7 @@ type PreviewItem = {
   billingType?: string;
   billingStartMonth?: string;
   status?: string;
+  billingSource?: "가입일자" | "인가일자+자격증명" | "확인필요";
   duplicateId?: number;
   closureType?: string;
   excludeStartMonth?: string;
@@ -98,8 +100,9 @@ function parseCSV(text: string): ImportRow[] {
         name: obj["name"] || "",
         rrn: obj["rrn"] || undefined,
         mobile: obj["mobile"] || undefined,
-        memberType: (obj["memberType"] as "개인회원" | "택배회원") || "개인회원",
+        memberType: ((obj["memberType"] === "일반회원" ? "개인회원" : obj["memberType"]) as "개인회원" | "택배회원") || "개인회원",
         joinDate: obj["joinDate"] || undefined,
+        approvalDate: obj["approvalDate"] || undefined,
         certificateDate: obj["certificateDate"] || undefined,
         vehicleType: obj["vehicleType"] || undefined,
         businessNo: obj["businessNo"] || undefined,
@@ -136,10 +139,10 @@ const CATEGORY_CONFIG: Record<
   확인필요: { label: "확인 필요", style: "bg-violet-50 text-violet-700 border border-violet-200", icon: HelpCircle },
 };
 
-const SAMPLE_CSV = `type,sourceSystemId,vehicleNo,name,memberType,joinDate,certificateDate,managementNo,region,closureType,processDate
-REGISTER,MEM-001,12가3456,홍길동,개인회원,2026-05-15,,MGT-001,강원,,
-REGISTER,MEM-002,34나5678,김철수,택배회원,,2026-04-20,MGT-002,강원,,
-REGISTER,MEM-003,56다7890,이영희,개인회원,,,MGT-003,강원,,
+const SAMPLE_CSV = `type,sourceSystemId,vehicleNo,name,memberType,joinDate,approvalDate,certificateDate,managementNo,region,closureType,processDate
+REGISTER,MEM-001,12가3456,홍길동,개인회원,2026-05-15,,,MGT-001,강원,,
+REGISTER,MEM-002,34나5678,김철수,택배회원,2026-04-01,2026-04-15,2026-04-20,MGT-002,강원,,
+REGISTER,MEM-003,56다7890,이영희,개인회원,,,,MGT-003,강원,,
 CLOSURE,CLO-001,12가3456,홍길동,,,,MGT-001,강원,폐업,2026-05-31`;
 
 export default function MemberImport() {
@@ -177,7 +180,8 @@ export default function MemberImport() {
     onSuccess: (data) => {
       setCurrentRows(data.rows as ImportRow[]);
       setPreview(data.items as PreviewItem[]);
-      setSelectedIndexes(new Set(data.items.map((i: any) => i.rowIndex)));
+      // 직접 연결 자료는 전체 선택하지 않는다. 먼저 미리보기만 확인하는 1단계 안전장치.
+      setSelectedIndexes(new Set());
       setPreviewSource("member-system");
       setMemberSystemSummary(data.source);
       setApplyResult(null);
@@ -269,7 +273,7 @@ export default function MemberImport() {
     setCurrentRows(null);
     setPreviewSource(null);
     setMemberSystemSummary(null);
-    memberSystemPreviewMutation.mutate({ includeMembers: true, includeClosures: true });
+    memberSystemPreviewMutation.mutate({ includeMembers: true, includeClosures: false });
   };
 
   const handleApply = () => {
@@ -345,9 +349,9 @@ export default function MemberImport() {
         <CardContent className="px-5 py-4 space-y-3">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
             <div>
-              <p className="text-sm text-slate-700 font-medium">기존 회원관리시스템에서 신규 회원과 폐업·양도·이관 자료를 읽어옵니다.</p>
+              <p className="text-sm text-slate-700 font-medium">1단계: 회원관리시스템에서 신규 회원 자료만 읽어와 협회비/관리비 대상을 미리보기합니다.</p>
               <p className="text-xs text-slate-500 mt-1">
-                이 단계는 읽기 전용입니다. 회원관리시스템의 자료는 수정하지 않고, 미리보기 후 선택한 건만 미수금 시스템에 반영합니다.
+                이 단계는 읽기 전용입니다. 회원관리시스템의 자료는 절대 수정하지 않고, 직접 연결 자료는 기본 선택 해제 상태로 표시됩니다.
               </p>
             </div>
             <Button
@@ -369,7 +373,7 @@ export default function MemberImport() {
           {memberSystemSummary && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">회원 {memberSystemSummary.membersCount}건</div>
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">폐업·양도·이관 {memberSystemSummary.closuresCount}건</div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">폐업·양도·이관 {memberSystemSummary.closuresCount}건 <span className="text-slate-400">(1단계 제외)</span></div>
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 truncate">출처 {memberSystemSummary.baseUrl}</div>
             </div>
           )}
@@ -468,7 +472,8 @@ export default function MemberImport() {
               <p><span className="font-mono text-slate-600">sourceSystemId</span> — 원본 시스템 고유 ID</p>
               <p><span className="font-mono text-slate-600">memberType</span> — 개인회원 / 택배회원 (REGISTER만)</p>
               <p><span className="font-mono text-slate-600">joinDate</span> — 가입일자 (개인회원 필수, YYYY-MM-DD)</p>
-              <p><span className="font-mono text-slate-600">certificateDate</span> — 자격증명 발급일 (택배회원 필수, YYYY-MM-DD)</p>
+              <p><span className="font-mono text-slate-600">approvalDate</span> — 인가일자 (택배 관리비 필수, YYYY-MM-DD)</p>
+              <p><span className="font-mono text-slate-600">certificateDate</span> — 자격증명 발급일 (택배 관리비 필수, YYYY-MM-DD)</p>
               <p><span className="font-mono text-slate-600">closureType</span> — 폐업 / 양도 / 이관 (CLOSURE만)</p>
               <p><span className="font-mono text-slate-600">processDate</span> — 처리일자 (CLOSURE 필수, YYYY-MM-DD)</p>
             </div>
@@ -598,7 +603,9 @@ export default function MemberImport() {
                               : item.excludeStartMonth || <span className="text-slate-300">-</span>}
                           </TableCell>
                           <TableCell className="text-xs text-slate-500 py-3 pr-5 max-w-[200px] truncate">
-                            {item.reason || (item.type === "CLOSURE" && !item.matchedCandidateId
+                            {item.reason || (item.type === "REGISTER" && item.billingSource
+                              ? `기준: ${item.billingSource}`
+                              : item.type === "CLOSURE" && !item.matchedCandidateId
                               ? "⚠ 미등록 회원"
                               : "-")}
                           </TableCell>
@@ -615,6 +622,7 @@ export default function MemberImport() {
           <div className="flex items-center justify-between bg-white border border-slate-200 rounded-xl px-5 py-4">
             <div className="text-sm text-slate-600">
               선택된 <strong className="text-slate-900">{selectedIndexes.size}건</strong>을 부과 대상자 / 폐업 현황에 반영합니다.
+              {previewSource === "member-system" ? " 직접 연결 자료는 기본 선택 해제 상태입니다. 1단계에서는 미리보기 분류를 먼저 확인하세요." : ""}
               회원관리시스템과 기존 납부 이력은 변경되지 않습니다.
             </div>
             <Button
