@@ -1292,6 +1292,26 @@ export const billingRouter = router({
 
       const results: { rowIndex: number; status: string; message: string }[] = [];
 
+      const skippedByMonthForWarning = typeof selectedByUser !== "undefined"
+        ? selectedByUser.filter((item) => !selected.some((s) => s.rowIndex === item.rowIndex))
+        : [];
+
+      for (const item of skippedByMonthForWarning) {
+        const sourceId = (item as any).sourceSystemId || ((item.raw as any)?.sourceSystemId) || "UNKNOWN";
+        const msg = item.status === "확인필요"
+          ? (item.reason || "확인필요 대상은 자동 반영하지 않았습니다.")
+          : "이번 달/다음 달 반영 대상이 아니므로 기존 부과 중으로 판단되어 제외되었습니다.";
+        try {
+          await createSyncLog({
+            eventType: "IMPORT",
+            sourceId,
+            status: "WARNING",
+            message: msg,
+          });
+        } catch (_) {}
+        results.push({ rowIndex: item.rowIndex, status: "warning", message: msg });
+      }
+
       for (const item of selected) {
         try {
           if (item.type === "REGISTER") {
