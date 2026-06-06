@@ -4,14 +4,31 @@ import NotFound from "@/pages/NotFound";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
-import Home from "./pages/Home";
+import DashboardLayout from "./components/DashboardLayout";
+import Dashboard from "./pages/Dashboard";
+import BillingCandidates from "./pages/BillingCandidates";
+import ClosureEvents from "./pages/ClosureEvents";
+import BillingRecords from "./pages/BillingRecords";
+import SyncLogs from "./pages/SyncLogs";
 
 function Router() {
-  // make sure to consider if you need authentication for certain routes
   return (
     <Switch>
-      <Route path={"/"} component={Home} />
-      <Route path={"/404"} component={NotFound} />
+      <Route path={"/"} nest>
+        {() => (
+          <DashboardLayout>
+            <Switch>
+              <Route path="/" component={Dashboard} />
+              <Route path="/candidates" component={BillingCandidates} />
+              <Route path="/closures" component={ClosureEvents} />
+              <Route path="/billing-records" component={BillingRecords} />
+              <Route path="/sync-logs" component={SyncLogs} />
+              <Route component={NotFound} />
+            </Switch>
+          </DashboardLayout>
+        )}
+      </Route>
+      <Route path="/404" component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />
     </Switch>
@@ -26,10 +43,7 @@ function Router() {
 function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider
-        defaultTheme="light"
-        // switchable
-      >
+      <ThemeProvider defaultTheme="light">
         <TooltipProvider>
           <Toaster />
           <Router />

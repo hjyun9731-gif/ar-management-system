@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
+import { InsertUser, users, billingCandidates, closureEvents, syncLogs, billingRecords, InsertBillingCandidate, InsertClosureEvent, InsertSyncLog, InsertBillingRecord } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -89,4 +89,121 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-// TODO: add feature queries here as your schema grows.
+// Billing Candidates queries
+export async function getBillingCandidates(filters?: {
+  region?: string;
+  memberType?: string;
+  status?: string;
+  billingStartMonth?: string;
+}) {
+  const db = await getDb();
+  if (!db) return [];
+
+  let query: any = db.select().from(billingCandidates);
+
+  if (filters?.region) {
+    query = query.where(eq(billingCandidates.region, filters.region));
+  }
+  if (filters?.memberType) {
+    query = query.where(eq(billingCandidates.memberType, filters.memberType));
+  }
+  if (filters?.status) {
+    query = query.where(eq(billingCandidates.status, filters.status));
+  }
+  if (filters?.billingStartMonth) {
+    query = query.where(eq(billingCandidates.billingStartMonth, filters.billingStartMonth));
+  }
+
+  return await query;
+}
+
+export async function getBillingCandidateById(id: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select().from(billingCandidates).where(eq(billingCandidates.id, id)).limit(1);
+  return result.length > 0 ? result[0] : null;
+}
+
+export async function createBillingCandidate(data: InsertBillingCandidate) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const result = await db.insert(billingCandidates).values(data);
+  return result;
+}
+
+export async function updateBillingCandidate(id: number, data: Partial<InsertBillingCandidate>) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.update(billingCandidates).set({ ...data, updatedAt: new Date() }).where(eq(billingCandidates.id, id));
+}
+
+// Closure Events queries
+export async function getClosureEvents(filters?: {
+  closureType?: string;
+  reflectStatus?: string;
+}) {
+  const db = await getDb();
+  if (!db) return [];
+
+  let query: any = db.select().from(closureEvents);
+
+  if (filters?.closureType) {
+    query = query.where(eq(closureEvents.closureType, filters.closureType));
+  }
+  if (filters?.reflectStatus) {
+    query = query.where(eq(closureEvents.reflectStatus, filters.reflectStatus));
+  }
+
+  return await query;
+}
+
+export async function createClosureEvent(data: InsertClosureEvent) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.insert(closureEvents).values(data);
+}
+
+// Sync Logs queries
+export async function createSyncLog(data: InsertSyncLog) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.insert(syncLogs).values(data);
+}
+
+export async function getSyncLogs(filters?: {
+  eventType?: string;
+  status?: string;
+}) {
+  const db = await getDb();
+  if (!db) return [];
+
+  let query: any = db.select().from(syncLogs);
+
+  if (filters?.eventType) {
+    query = query.where(eq(syncLogs.eventType, filters.eventType));
+  }
+  if (filters?.status) {
+    query = query.where(eq(syncLogs.status, filters.status));
+  }
+
+  return await query;
+}
+
+// Billing Records queries
+export async function getBillingRecords(billingCandidateId?: number) {
+  const db = await getDb();
+  if (!db) return [];
+
+  if (billingCandidateId) {
+    return await db.select().from(billingRecords).where(eq(billingRecords.billingCandidateId, billingCandidateId));
+  }
+  return await db.select().from(billingRecords);
+}
+
+export async function createBillingRecord(data: InsertBillingRecord) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.insert(billingRecords).values(data);
+}
+
+
