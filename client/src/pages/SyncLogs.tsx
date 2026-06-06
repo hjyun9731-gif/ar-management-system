@@ -14,11 +14,14 @@ const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
 
 export default function SyncLogs() {
   const [filters, setFilters] = useState({
-    eventType: "",
-    status: "",
+    eventType: "all",
+    status: "all",
   });
 
-  const { data: logs = [], isLoading } = trpc.billing.listSyncLogs.useQuery(filters);
+  const { data: logs = [], isLoading } = trpc.billing.listSyncLogs.useQuery({
+    eventType: filters.eventType === "all" ? undefined : filters.eventType,
+    status: filters.status === "all" ? undefined : filters.status,
+  });
 
   if (isLoading) {
     return (
@@ -51,7 +54,7 @@ export default function SyncLogs() {
                   <SelectValue placeholder="선택" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">전체</SelectItem>
+                  <SelectItem value="all">전체</SelectItem>
                   <SelectItem value="REGISTER">신규 등록</SelectItem>
                   <SelectItem value="CLOSURE">폐업 처리</SelectItem>
                 </SelectContent>
@@ -65,7 +68,7 @@ export default function SyncLogs() {
                   <SelectValue placeholder="선택" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">전체</SelectItem>
+                  <SelectItem value="all">전체</SelectItem>
                   <SelectItem value="SUCCESS">성공</SelectItem>
                   <SelectItem value="FAIL">실패</SelectItem>
                   <SelectItem value="WARNING">경고</SelectItem>

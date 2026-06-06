@@ -16,11 +16,14 @@ const REFLECT_STATUS_COLORS: Record<string, { bg: string; text: string }> = {
 
 export default function ClosureEvents() {
   const [filters, setFilters] = useState({
-    closureType: "",
-    reflectStatus: "",
+    closureType: "all",
+    reflectStatus: "all",
   });
 
-  const { data: closures = [], isLoading } = trpc.billing.listClosures.useQuery(filters);
+  const { data: closures = [], isLoading } = trpc.billing.listClosures.useQuery({
+    closureType: filters.closureType === "all" ? undefined : filters.closureType,
+    reflectStatus: filters.reflectStatus === "all" ? undefined : filters.reflectStatus,
+  });
 
   const handleExportExcel = () => {
     const headers = ["구분", "관리번호", "지역", "차량번호", "성명", "접수일자", "처리일자", "기존 미수금액", "반영상태"];
@@ -75,7 +78,7 @@ export default function ClosureEvents() {
                   <SelectValue placeholder="선택" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">전체</SelectItem>
+                  <SelectItem value="all">전체</SelectItem>
                   <SelectItem value="폐업">폐업</SelectItem>
                   <SelectItem value="양도">양도</SelectItem>
                   <SelectItem value="이관">이관</SelectItem>
@@ -90,7 +93,7 @@ export default function ClosureEvents() {
                   <SelectValue placeholder="선택" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">전체</SelectItem>
+                  <SelectItem value="all">전체</SelectItem>
                   <SelectItem value="반영완료">반영완료</SelectItem>
                   <SelectItem value="미수금있음">미수금있음</SelectItem>
                   <SelectItem value="확인필요">확인필요</SelectItem>

@@ -45,16 +45,21 @@ function getCalculationReason(
 
 export default function BillingCandidates() {
   const [filters, setFilters] = useState({
-    region: "",
-    memberType: "",
-    status: "",
+    region: "all",
+    memberType: "all",
+    status: "all",
     billingStartMonth: "",
   });
 
   const [searchText, setSearchText] = useState("");
   const [selectedCandidateId, setSelectedCandidateId] = useState<number | null>(null);
 
-  const { data: candidates = [], isLoading } = trpc.billing.listCandidates.useQuery(filters);
+  const { data: candidates = [], isLoading } = trpc.billing.listCandidates.useQuery({
+    region: filters.region === "all" ? undefined : filters.region,
+    memberType: filters.memberType === "all" ? undefined : filters.memberType,
+    status: filters.status === "all" ? undefined : filters.status,
+    billingStartMonth: filters.billingStartMonth || undefined,
+  });
 
   const filteredCandidates = useMemo(() => {
     if (!searchText) return candidates;
@@ -137,7 +142,7 @@ export default function BillingCandidates() {
                   <SelectValue placeholder="전체" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">전체</SelectItem>
+                  <SelectItem value="all">전체</SelectItem>
                   <SelectItem value="서울">서울</SelectItem>
                   <SelectItem value="경기">경기</SelectItem>
                   <SelectItem value="인천">인천</SelectItem>
@@ -152,7 +157,7 @@ export default function BillingCandidates() {
                   <SelectValue placeholder="전체" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">전체</SelectItem>
+                  <SelectItem value="all">전체</SelectItem>
                   <SelectItem value="개인회원">개인회원</SelectItem>
                   <SelectItem value="택배회원">택배회원</SelectItem>
                 </SelectContent>
@@ -166,7 +171,7 @@ export default function BillingCandidates() {
                   <SelectValue placeholder="전체" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">전체</SelectItem>
+                  <SelectItem value="all">전체</SelectItem>
                   <SelectItem value="대기">대기</SelectItem>
                   <SelectItem value="부과예정">부과예정</SelectItem>
                   <SelectItem value="부과반영완료">부과반영완료</SelectItem>
