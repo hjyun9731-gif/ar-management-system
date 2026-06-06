@@ -156,6 +156,7 @@ const registerRowSchema = z.object({
   mobile: z.string().optional(),
   memberType: z.enum(["개인회원", "택배회원", "일반회원"]).transform((v) => v === "일반회원" ? "개인회원" : v),
   joinDate: z.string().optional(),
+  joinStatus: z.string().optional(),
   approvalDate: z.string().optional(),
   certificateDate: z.string().optional(),
   vehicleType: z.string().optional(),
@@ -261,18 +262,39 @@ function buildRegisterPreviewItems(row: z.infer<typeof registerRowSchema>, list:
   const isBaeVehicle = String(row.vehicleNo || "").includes("배");
 
   // 1단계 확정 규칙:
-  // 일반 가입자(배번호 제외) 중 가입일자가 있는 사람만 협회비 부과대상으로 추출한다.
+  // 일반 가입자(배번호 제외)만 본다.
+  // 가입 상태가 가입인 일반 차량은 미리보기 목록에 포함한다.
+  // 가입일자가 정상 파싱되면 협회비 대상, 가입 상태는 가입인데 가입일자를 못 읽으면 날짜누락으로 분리한다.
   // 배번호/택배/관리비 대상은 이번 1단계에서 완전히 제외한다.
-  // 가입일자가 없는 일반 차량도 부과대상 명단에는 포함하지 않는다.
   if (isBaeVehicle) return [];
-  if (!hasValue(row.joinDate)) return [];
+
+  const joinStatus = String(row.joinStatus || "").trim();
+  const isJoined = joinStatus === "가입" || joinStatus.includes("가입");
+  const isNonJoined = joinStatus.includes("미가입") || joinStatus.toLowerCase() === "x";
+  const billingStartDate = nextBillingMonth(row.joinDate);
+
+  if (isNonJoined) return [];
+
+  if (!billingStartDate) {
+    if (!isJoined) return [];
+    return [makeRegisterPreviewItem({
+      row,
+      rowIndex: nextIndex(),
+      list,
+      billingType: "확인필요",
+      billingStartMonth: "",
+      status: "확인필요",
+      billingSource: "확인필요",
+      reason: "가입 상태는 가입이나 가입일자 파싱 실패",
+    })];
+  }
 
   return [makeRegisterPreviewItem({
     row,
     rowIndex: nextIndex(),
     list,
     billingType: "협회비",
-    billingStartMonth: nextBillingMonth(row.joinDate) || "",
+    billingStartMonth: billingStartDate,
     status: "대기",
     billingSource: "가입일자",
     reason: "일반 가입자(배번호 제외) 가입일자 기준 협회비",
@@ -414,8 +436,8 @@ function normalizeJoinStatus(value: any): string {
   return String(value ?? "").trim();
 }
 
-function isExplicitNonJoined(member: any): boolean {
-  const status = normalizeJoinStatus(firstValue(
+function getRawJoinStatus(member: any): string {
+  return normalizeJoinStatus(firstValue(
     member.membership_status,
     member.member_status,
     member.join_status,
@@ -423,8 +445,13 @@ function isExplicitNonJoined(member: any): boolean {
     member.membership,
     member.joined,
     member.가입,
-    member.가입여부
+    member.가입여부,
+    member.status
   ));
+}
+
+function isExplicitNonJoined(member: any): boolean {
+  const status = getRawJoinStatus(member);
   if (!status) return false;
   return status.includes("미가입") || status === "x" || status === "X" || status === "false" || status === "0";
 }
@@ -457,9 +484,16 @@ function mapMemberSystemMemberToImportRow(member: any): ImportRow {
     member.join_at,
     member.joined_at,
     member.registration_date,
+    member.joined_date,
+    member.member_joined_date,
+    member.association_date,
+    member.join_dt,
     member.가입일자,
-    member.가입일
+    member.가입일,
+    member.가입날짜,
+    member.가입일시
   );
+  const rawJoinStatus = getRawJoinStatus(member);
 
   const rawApprovalDate = firstValue(member.approval_date, member.approvalDate, member.authorization_date, member.인가일자, member.인가일);
   const rawCertificateDate = firstValue(
@@ -484,6 +518,7 @@ function mapMemberSystemMemberToImportRow(member: any): ImportRow {
     mobile: firstValue(member.mobile, member.phone, member.핸드폰, member.휴대폰) || undefined,
     memberType: mapMemberType(member.category, vehicleNo),
     joinDate,
+    joinStatus: rawJoinStatus || undefined,
     approvalDate: toDateString(rawApprovalDate),
     certificateDate: toDateString(rawCertificateDate),
     vehicleType: firstValue(member.vehicle_type, member.vehicleType, member.차종) || undefined,
