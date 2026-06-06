@@ -1322,7 +1322,7 @@ export const billingRouter = router({
                 vehicleNo: row.vehicleNo,
                 name: row.name,
                 rrn: row.rrn,
-                mobile: row.mobile,
+                mobile: normalizedMobile.mobile || row.mobile,
                 vehicleType: row.vehicleType,
                 businessNo: row.businessNo,
                 company: row.company,
