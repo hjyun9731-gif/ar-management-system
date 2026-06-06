@@ -11,6 +11,7 @@ import BillingApproval from "./pages/BillingApproval";
 import ClosureEvents from "./pages/ClosureEvents";
 import BillingRecords from "./pages/BillingRecords";
 import SyncLogs from "./pages/SyncLogs";
+import MemberImport from "./pages/MemberImport";
 
 function Router() {
   return (
@@ -25,6 +26,7 @@ function Router() {
               <Route path="/closures" component={ClosureEvents} />
               <Route path="/billing-records" component={BillingRecords} />
               <Route path="/sync-logs" component={SyncLogs} />
+              <Route path="/import" component={MemberImport} />
               <Route component={NotFound} />
             </Switch>
           </DashboardLayout>

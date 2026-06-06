@@ -13,6 +13,7 @@ import {
   Activity,
   ChevronRight,
   UserCircle,
+  FolderInput,
 } from "lucide-react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/_core/hooks/useAuth";
@@ -29,6 +30,7 @@ const NAV_ITEMS = [
   { label: "폐업·양도·이관 현황", href: "/closures", icon: Building2 },
   { label: "납부현황", href: "/billing-records", icon: Receipt },
   { label: "연동 로그", href: "/sync-logs", icon: Activity },
+  { label: "회원관리 자료 불러오기", href: "/import", icon: FolderInput },
 ];
 
 function getPageTitle(location: string): string {

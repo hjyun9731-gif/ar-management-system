@@ -95,6 +95,163 @@ function determineBillingType(
   return { billingType: "확인필요", status: "확인필요" };
 }
 
+// ---- Import preview / apply types ----
+
+const registerRowSchema = z.object({
+  type: z.literal("REGISTER"),
+  sourceSystemId: z.string(),
+  managementNo: z.string().optional(),
+  region: z.string().optional(),
+  vehicleNo: z.string(),
+  name: z.string(),
+  rrn: z.string().optional(),
+  mobile: z.string().optional(),
+  memberType: z.enum(["개인회원", "택배회원"]),
+  joinDate: z.string().optional(),
+  certificateDate: z.string().optional(),
+  vehicleType: z.string().optional(),
+  businessNo: z.string().optional(),
+  company: z.string().optional(),
+  memo: z.string().optional(),
+});
+
+const closureRowSchema = z.object({
+  type: z.literal("CLOSURE"),
+  sourceSystemId: z.string(),
+  closureType: z.enum(["폐업", "양도", "이관"]),
+  managementNo: z.string(),
+  region: z.string().optional(),
+  vehicleNo: z.string(),
+  name: z.string(),
+  processDate: z.string(),
+  receiptDate: z.string().optional(),
+});
+
+const importRowSchema = z.discriminatedUnion("type", [registerRowSchema, closureRowSchema]);
+
+type ImportRow = z.infer<typeof importRowSchema>;
+
+interface PreviewRegisterItem {
+  rowIndex: number;
+  type: "REGISTER";
+  category: "신규" | "중복의심" | "날짜누락" | "확인필요";
+  sourceSystemId: string;
+  vehicleNo: string;
+  name: string;
+  memberType: string;
+  billingType: string;
+  billingStartMonth: string;
+  status: string;
+  duplicateId?: number;
+  reason?: string;
+  raw: z.infer<typeof registerRowSchema>;
+}
+
+interface PreviewClosureItem {
+  rowIndex: number;
+  type: "CLOSURE";
+  category: "폐업양도이관";
+  sourceSystemId: string;
+  vehicleNo: string;
+  name: string;
+  closureType: string;
+  excludeStartMonth: string;
+  matchedCandidateId?: number;
+  reason?: string;
+  raw: z.infer<typeof closureRowSchema>;
+}
+
+type PreviewItem = PreviewRegisterItem | PreviewClosureItem;
+
+async function buildPreview(rows: ImportRow[]): Promise<PreviewItem[]> {
+  const allCandidates = await getBillingCandidates();
+  const list: any[] = await allCandidates;
+
+  const items: PreviewItem[] = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+
+    if (row.type === "REGISTER") {
+      // duplicate check
+      let duplicateId: number | undefined;
+      if (row.rrn) {
+        const found = list.find((c: any) => c.rrn === row.rrn);
+        if (found) duplicateId = found.id;
+      }
+      if (!duplicateId) {
+        const found = list.find((c: any) => c.vehicleNo === row.vehicleNo);
+        if (found) duplicateId = found.id;
+      }
+      if (!duplicateId) {
+        const last4 = row.vehicleNo.slice(-4);
+        const found = list.find((c: any) => c.name === row.name && c.vehicleNo.slice(-4) === last4);
+        if (found) duplicateId = found.id;
+      }
+
+      const billingStartMonth = calculateBillingStartMonth(row.memberType, row.joinDate, row.certificateDate);
+      const { billingType, status } = determineBillingType(row.memberType, row.joinDate, row.certificateDate);
+
+      let category: PreviewRegisterItem["category"];
+      let reason: string | undefined;
+
+      if (duplicateId) {
+        category = "중복의심";
+        reason = `기존 ID ${duplicateId}와 차량번호/주민번호 중복`;
+      } else if (status === "확인필요") {
+        const missing = row.memberType === "개인회원" ? "joinDate" : "certificateDate";
+        category = "날짜누락";
+        reason = `${missing} 누락`;
+      } else {
+        category = "신규";
+      }
+
+      items.push({
+        rowIndex: i,
+        type: "REGISTER",
+        category,
+        sourceSystemId: row.sourceSystemId,
+        vehicleNo: row.vehicleNo,
+        name: row.name,
+        memberType: row.memberType,
+        billingType,
+        billingStartMonth: billingStartMonth || "",
+        status,
+        duplicateId,
+        reason,
+        raw: row,
+      });
+    } else {
+      // CLOSURE
+      const processDate = new Date(row.processDate);
+      const nextMonthVal = processDate.getMonth() + 2;
+      const nextYear = nextMonthVal > 12 ? processDate.getFullYear() + 1 : processDate.getFullYear();
+      const nextMonth = nextMonthVal > 12 ? nextMonthVal - 12 : nextMonthVal;
+      const excludeStartMonth = `${nextYear}-${String(nextMonth).padStart(2, "0")}`;
+
+      const matched = list.find(
+        (c: any) => c.vehicleNo === row.vehicleNo || c.managementNo === row.managementNo
+      );
+
+      items.push({
+        rowIndex: i,
+        type: "CLOSURE",
+        category: "폐업양도이관",
+        sourceSystemId: row.sourceSystemId,
+        vehicleNo: row.vehicleNo,
+        name: row.name,
+        closureType: row.closureType,
+        excludeStartMonth,
+        matchedCandidateId: matched?.id,
+        reason: matched ? undefined : "부과 대상자 미등록 (신규 등록 필요)",
+        raw: row,
+      });
+    }
+  }
+
+  return items;
+}
+
 export const billingRouter = router({
   // 신규 등록 연동 API
   syncMembers: publicProcedure
@@ -426,6 +583,139 @@ export const billingRouter = router({
       confirmNeededCount,
     };
   }),
+
+  // 회원관리 자료 불러오기 - 미리보기 (DB 쓰기 없음)
+  previewImport: publicProcedure
+    .input(z.object({ rows: z.array(importRowSchema) }))
+    .mutation(async ({ input }) => {
+      const items = await buildPreview(input.rows);
+      return { items };
+    }),
+
+  // 회원관리 자료 불러오기 - 반영 (선택된 rowIndex만 처리)
+  applyImport: publicProcedure
+    .input(
+      z.object({
+        rows: z.array(importRowSchema),
+        selectedIndexes: z.array(z.number()),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const preview = await buildPreview(input.rows);
+      const selected = preview.filter((item) => input.selectedIndexes.includes(item.rowIndex));
+
+      const results: { rowIndex: number; status: string; message: string }[] = [];
+
+      for (const item of selected) {
+        try {
+          if (item.type === "REGISTER") {
+            const row = item.raw as z.infer<typeof registerRowSchema>;
+
+            if (item.duplicateId) {
+              await updateBillingCandidate(item.duplicateId, {
+                status: "확인필요",
+                memo: `중복 데이터(불러오기): ${row.sourceSystemId}`,
+              });
+              await createSyncLog({
+                eventType: "IMPORT",
+                sourceId: row.sourceSystemId,
+                targetId: String(item.duplicateId),
+                status: "WARNING",
+                message: "중복 데이터 - 확인필요 상태로 변경",
+              });
+              results.push({ rowIndex: item.rowIndex, status: "warning", message: "중복 - 확인필요 처리" });
+            } else {
+              const billingStartMonth = calculateBillingStartMonth(row.memberType, row.joinDate, row.certificateDate);
+              const { billingType, status } = determineBillingType(row.memberType, row.joinDate, row.certificateDate);
+              const result: any = await createBillingCandidate({
+                sourceSystemId: row.sourceSystemId,
+                managementNo: row.managementNo,
+                region: row.region,
+                vehicleNo: row.vehicleNo,
+                name: row.name,
+                rrn: row.rrn,
+                mobile: row.mobile,
+                vehicleType: row.vehicleType,
+                businessNo: row.businessNo,
+                company: row.company,
+                joinDate: row.joinDate ? new Date(row.joinDate) : undefined,
+                certificateDate: row.certificateDate ? new Date(row.certificateDate) : undefined,
+                memo: row.memo,
+                memberType: row.memberType,
+                billingType,
+                billingStartMonth: billingStartMonth || "",
+                status,
+              });
+              const candidateId = result?.insertId || 0;
+              await createSyncLog({
+                eventType: "IMPORT",
+                sourceId: row.sourceSystemId,
+                targetId: String(candidateId),
+                status: status === "확인필요" ? "WARNING" : "SUCCESS",
+                message: status === "확인필요"
+                  ? `필수 날짜 누락 (${row.memberType === "개인회원" ? "joinDate" : "certificateDate"})`
+                  : `${billingType} 대상자 등록 (부과시작월: ${billingStartMonth})`,
+              });
+              results.push({ rowIndex: item.rowIndex, status: "success", message: `${billingType} 등록 완료` });
+            }
+          } else {
+            // CLOSURE
+            const row = item.raw as z.infer<typeof closureRowSchema>;
+            const processDate = new Date(row.processDate);
+            const nextMonthVal = processDate.getMonth() + 2;
+            const nextYear = nextMonthVal > 12 ? processDate.getFullYear() + 1 : processDate.getFullYear();
+            const nextMonth = nextMonthVal > 12 ? nextMonthVal - 12 : nextMonthVal;
+            const excludeStartMonth = `${nextYear}-${String(nextMonth).padStart(2, "0")}`;
+
+            const closureResult: any = await createClosureEvent({
+              sourceSystemId: row.sourceSystemId,
+              closureType: row.closureType,
+              managementNo: row.managementNo,
+              region: row.region,
+              vehicleNo: row.vehicleNo,
+              name: row.name,
+              receiptDate: row.receiptDate ? new Date(row.receiptDate) : undefined,
+              processDate: processDate,
+              excludeStartMonth,
+              unpaidAmountAtClosure: 0,
+              reflectStatus: "확인필요",
+            });
+            const closureId = closureResult?.insertId || 0;
+
+            if (item.matchedCandidateId) {
+              await updateBillingCandidate(item.matchedCandidateId, {
+                status: "제외",
+                memo: `${row.closureType} 처리(불러오기): ${row.sourceSystemId}`,
+              } as any);
+            }
+
+            await createSyncLog({
+              eventType: "IMPORT",
+              sourceId: row.sourceSystemId,
+              targetId: String(closureId),
+              status: "SUCCESS",
+              message: `${row.closureType} 등록, ${excludeStartMonth}부터 부과 제외`,
+            });
+            results.push({ rowIndex: item.rowIndex, status: "success", message: `${row.closureType} 등록 완료` });
+          }
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "오류";
+          await createSyncLog({
+            eventType: "IMPORT",
+            sourceId: (item.raw as any).sourceSystemId,
+            status: "FAIL",
+            message,
+          });
+          results.push({ rowIndex: item.rowIndex, status: "fail", message });
+        }
+      }
+
+      const successCount = results.filter((r) => r.status === "success").length;
+      const warningCount = results.filter((r) => r.status === "warning").length;
+      const failCount = results.filter((r) => r.status === "fail").length;
+
+      return { results, successCount, warningCount, failCount };
+    }),
 
   // 수동 부과 배치 실행
   runManualBillingBatch: publicProcedure
