@@ -67,9 +67,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     }
   };
 
-  if (loading) {
-    return <DashboardLayoutSkeleton />;
-  }
+  // Don't block rendering while auth is loading - render with empty state if needed
+  // Loading state is only shown in skeleton components within pages
 
   return (
     <div className="flex h-screen bg-gray-50">

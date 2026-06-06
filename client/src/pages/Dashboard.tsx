@@ -25,46 +25,47 @@ export default function Dashboard() {
     }
   }, [dashboardData]);
 
-  if (isLoading || loading) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <Loader2 className="animate-spin w-8 h-8 text-muted-foreground" />
-      </div>
-    );
-  }
+  // Show loading skeleton while fetching, but don't block rendering
+  const displayStats = stats || {
+    nextMonthCount: 0,
+    thisMonthCount: 0,
+    closurePendingCount: 0,
+    unpaidCount: 0,
+    confirmNeededCount: 0,
+  };
 
   const statCards = [
     {
       title: "다음 달 부과 대상",
-      value: stats?.nextMonthCount || 0,
+      value: displayStats.nextMonthCount,
       color: "bg-yellow-50 border-yellow-200",
       badgeColor: "bg-yellow-100 text-yellow-800",
       icon: "📋",
     },
     {
       title: "이번 달 부과 예정",
-      value: stats?.thisMonthCount || 0,
+      value: displayStats.thisMonthCount,
       color: "bg-blue-50 border-blue-200",
       badgeColor: "bg-blue-100 text-blue-800",
       icon: "📅",
     },
     {
       title: "폐업 반영 대기",
-      value: stats?.closurePendingCount || 0,
+      value: displayStats.closurePendingCount,
       color: "bg-red-50 border-red-200",
       badgeColor: "bg-red-100 text-red-800",
       icon: "⚠️",
     },
     {
       title: "미수금 있음",
-      value: stats?.unpaidCount || 0,
+      value: displayStats.unpaidCount,
       color: "bg-purple-50 border-purple-200",
       badgeColor: "bg-purple-100 text-purple-800",
       icon: "💰",
     },
     {
       title: "확인 필요",
-      value: stats?.confirmNeededCount || 0,
+      value: displayStats.confirmNeededCount,
       color: "bg-orange-50 border-orange-200",
       badgeColor: "bg-orange-100 text-orange-800",
       icon: "🔍",

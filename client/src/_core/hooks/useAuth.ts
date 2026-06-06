@@ -14,6 +14,8 @@ export function useAuth(options?: UseAuthOptions) {
   const meQuery = trpc.auth.me.useQuery(undefined, {
     retry: false,
     refetchOnWindowFocus: false,
+    // Treat auth errors as "no user" rather than failures
+    throwOnError: false,
   });
 
   const logoutMutation = trpc.auth.logout.useMutation({
@@ -46,16 +48,13 @@ export function useAuth(options?: UseAuthOptions) {
     );
     return {
       user: meQuery.data ?? null,
-      loading: meQuery.isLoading || logoutMutation.isPending,
-      error: meQuery.error ?? logoutMutation.error ?? null,
+      loading: meQuery.isLoading,
+      error: null, // Don't treat auth errors as errors
       isAuthenticated: Boolean(meQuery.data),
     };
   }, [
     meQuery.data,
-    meQuery.error,
     meQuery.isLoading,
-    logoutMutation.error,
-    logoutMutation.isPending,
   ]);
 
   return {
