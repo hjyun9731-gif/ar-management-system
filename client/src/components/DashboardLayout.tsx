@@ -71,66 +71,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     return <DashboardLayoutSkeleton />;
   }
 
-  // Show simple login if no user
-  if (!user) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-        <div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full space-y-6">
-          <div className="text-center space-y-2">
-            <div className="flex justify-center mb-4">
-              <Lock className="w-12 h-12 text-blue-600" />
-            </div>
-            <h1 className="text-2xl font-bold text-gray-900">협회비·관리비 부과 관리</h1>
-            <p className="text-gray-600">관리자 접근</p>
-          </div>
-
-          {!showSimpleLogin ? (
-            <Button
-              onClick={() => setShowSimpleLogin(true)}
-              className="w-full bg-blue-600 hover:bg-blue-700 h-10"
-            >
-              관리자 로그인
-            </Button>
-          ) : (
-            <form onSubmit={handleSimpleLogin} className="space-y-4">
-              <div>
-                <label className="text-sm font-medium text-gray-700">관리자 비밀번호</label>
-                <Input
-                  type="password"
-                  placeholder="비밀번호 입력"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="mt-1"
-                  autoFocus
-                />
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setShowSimpleLogin(false);
-                    setPassword("");
-                  }}
-                  className="flex-1"
-                >
-                  취소
-                </Button>
-                <Button
-                  type="submit"
-                  disabled={isLoggingIn || !password}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700"
-                >
-                  {isLoggingIn ? "로그인 중..." : "로그인"}
-                </Button>
-              </div>
-            </form>
-          )}
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="flex h-screen bg-gray-50">
       {/* Sidebar */}
@@ -167,22 +107,24 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         <div className="border-t border-gray-700 p-4">
           <div className="flex items-center justify-between">
             <div className="flex-1">
-              <p className="text-sm font-medium text-white">{user.name || "Administrator"}</p>
-              <p className="text-xs text-gray-400">{user.email || "admin@internal"}</p>
+              <p className="text-sm font-medium text-white">{user?.name || "Administrator"}</p>
+              <p className="text-xs text-gray-400">{user?.email || "admin@internal"}</p>
             </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className="p-1 hover:bg-gray-700 rounded-lg transition-colors">
-                  <Settings className="w-5 h-5 text-gray-300" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuItem onClick={handleLogout} className="text-red-600 cursor-pointer">
-                  <LogOut className="w-4 h-4 mr-2" />
-                  로그아웃
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {user && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button className="p-1 hover:bg-gray-700 rounded-lg transition-colors">
+                    <Settings className="w-5 h-5 text-gray-300" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem onClick={handleLogout} className="text-red-600 cursor-pointer">
+                    <LogOut className="w-4 h-4 mr-2" />
+                    로그아웃
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
         </div>
       </aside>
@@ -192,22 +134,24 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         {/* Top Bar */}
         <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
           <div className="flex-1" />
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors">
-                <div className="text-right">
-                  <p className="text-sm font-medium text-gray-900">{user.name || "Administrator"}</p>
-                  <p className="text-xs text-gray-500">{user.email || "admin@internal"}</p>
-                </div>
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuItem onClick={handleLogout} className="text-red-600 cursor-pointer">
-                <LogOut className="w-4 h-4 mr-2" />
-                로그아웃
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {user && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors">
+                  <div className="text-right">
+                    <p className="text-sm font-medium text-gray-900">{user.name || "Administrator"}</p>
+                    <p className="text-xs text-gray-500">{user.email || "admin@internal"}</p>
+                  </div>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuItem onClick={handleLogout} className="text-red-600 cursor-pointer">
+                  <LogOut className="w-4 h-4 mr-2" />
+                  로그아웃
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </header>
 
         {/* Content */}
