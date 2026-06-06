@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, Download, Search, Filter } from "lucide-react";
+import { Loader2, Download, Search, Filter, AlertCircle } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { CandidateDetailModal } from "@/components/CandidateDetailModal";
 
@@ -17,6 +17,31 @@ const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
   보류: { bg: "bg-gray-100", text: "text-gray-800" },
   제외: { bg: "bg-gray-200", text: "text-gray-700" },
 };
+
+function getCalculationReason(
+  memberType: string,
+  joinDate?: string,
+  certificateDate?: string,
+  billingType?: string
+): string {
+  if (billingType === "확인필요") {
+    if (memberType === "개인회원" && !joinDate) {
+      return "joinDate 누락";
+    }
+    if (memberType === "택배회원" && !certificateDate) {
+      return "certificateDate 누락";
+    }
+    return "정보 부족";
+  }
+
+  if (memberType === "개인회원" && billingType === "협회비") {
+    return "협회비: joinDate 기준";
+  }
+  if (memberType === "택배회원" && billingType === "관리비") {
+    return "관리비: certificateDate 기준";
+  }
+  return "";
+}
 
 export default function BillingCandidates() {
   const [filters, setFilters] = useState({
@@ -32,33 +57,32 @@ export default function BillingCandidates() {
   const { data: candidates = [], isLoading } = trpc.billing.listCandidates.useQuery(filters);
 
   const filteredCandidates = useMemo(() => {
-    return candidates.filter((c: any) => {
-      if (searchText) {
-        const search = searchText.toLowerCase();
-        return (
-          (c.vehicleNo?.toLowerCase().includes(search) || false) ||
-          (c.name?.toLowerCase().includes(search) || false)
-        );
-      }
-      return true;
-    });
+    if (!searchText) return candidates;
+    return candidates.filter(
+      (c: any) =>
+        c.vehicleNo?.includes(searchText) ||
+        c.name?.includes(searchText) ||
+        c.managementNo?.includes(searchText)
+    );
   }, [candidates, searchText]);
 
-  const handleExportExcel = () => {
-    const headers = ["지역", "차량번호", "성명", "구분", "자격증명 발급일자", "가입일자", "부과시작월", "부과항목", "상태"];
-    const rows = filteredCandidates.map((c: any) => [
-      c.region || "",
-      c.vehicleNo || "",
-      c.name || "",
-      c.memberType || "",
-      c.certificateDate || "",
-      c.joinDate || "",
-      c.billingStartMonth || "",
-      c.billingType || "",
-      c.status || "",
-    ]);
+  const handleDownloadExcel = () => {
+    const csv = [
+      ["차량번호", "성명", "지역", "구분", "부과항목", "부과시작월", "상태", "계산 근거"],
+      ...filteredCandidates.map((c: any) => [
+        c.vehicleNo,
+        c.name,
+        c.region || "",
+        c.memberType,
+        c.billingType,
+        c.billingStartMonth || "",
+        c.status,
+        getCalculationReason(c.memberType, c.joinDate, c.certificateDate, c.billingType),
+      ]),
+    ]
+      .map((row: any[]) => row.map((cell: any) => `"${cell}"`).join(","))
+      .join("\n");
 
-    const csv = [headers, ...rows].map((row: any) => row.map((cell: any) => `"${cell}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
@@ -77,46 +101,55 @@ export default function BillingCandidates() {
   return (
     <div className="space-y-6 p-8">
       <div className="space-y-2">
-        <h1 className="text-3xl font-bold text-gray-900">다음 달 부과 대상자</h1>
-        <p className="text-gray-600">신규 등록 회원 관리 및 부과 대상자 현황</p>
+        <h1 className="text-3xl font-bold text-gray-900">다음 달 부과 대상</h1>
+        <p className="text-gray-600">회원 정보 및 부과 대상 관리</p>
       </div>
 
-      <Card className="border-2 border-gray-200">
+      {/* 필터 및 검색 */}
+      <Card className="bg-white border border-gray-200">
         <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            <span>필터 및 검색</span>
-            <Filter className="w-5 h-5 text-gray-400" />
+          <CardTitle className="text-base flex items-center gap-2">
+            <Filter className="w-4 h-4" />
+            필터 및 검색
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-            <div className="space-y-2">
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            <div>
               <label className="text-sm font-medium text-gray-700">검색 (차량번호/성명)</label>
-              <div className="relative">
-                <Search className="absolute left-3 top-3 w-4 h-4 text-gray-400" />
+              <div className="flex gap-2 mt-1">
                 <Input
                   placeholder="검색..."
                   value={searchText}
                   onChange={(e) => setSearchText(e.target.value)}
-                  className="pl-10"
+                  className="flex-1"
                 />
+                <Button variant="outline" size="icon">
+                  <Search className="w-4 h-4" />
+                </Button>
               </div>
             </div>
 
-            <div className="space-y-2">
+            <div>
               <label className="text-sm font-medium text-gray-700">지역</label>
-              <Input
-                placeholder="지역"
-                value={filters.region}
-                onChange={(e) => setFilters({ ...filters, region: e.target.value })}
-              />
+              <Select value={filters.region} onValueChange={(v) => setFilters({ ...filters, region: v })}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="전체" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">전체</SelectItem>
+                  <SelectItem value="서울">서울</SelectItem>
+                  <SelectItem value="경기">경기</SelectItem>
+                  <SelectItem value="인천">인천</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
-            <div className="space-y-2">
+            <div>
               <label className="text-sm font-medium text-gray-700">구분</label>
               <Select value={filters.memberType} onValueChange={(v) => setFilters({ ...filters, memberType: v })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="선택" />
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="전체" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="">전체</SelectItem>
@@ -126,11 +159,11 @@ export default function BillingCandidates() {
               </Select>
             </div>
 
-            <div className="space-y-2">
+            <div>
               <label className="text-sm font-medium text-gray-700">상태</label>
               <Select value={filters.status} onValueChange={(v) => setFilters({ ...filters, status: v })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="선택" />
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="전체" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="">전체</SelectItem>
@@ -144,52 +177,84 @@ export default function BillingCandidates() {
               </Select>
             </div>
 
-            <div className="flex items-end">
-              <Button onClick={handleExportExcel} className="w-full bg-green-600 hover:bg-green-700">
-                <Download className="w-4 h-4 mr-2" />
-                엑셀 다운로드
-              </Button>
+            <div>
+              <label className="text-sm font-medium text-gray-700">부과시작월</label>
+              <Input
+                type="month"
+                value={filters.billingStartMonth}
+                onChange={(e) => setFilters({ ...filters, billingStartMonth: e.target.value })}
+                className="mt-1"
+              />
             </div>
+          </div>
+
+          <div className="flex justify-end">
+            <Button onClick={handleDownloadExcel} variant="outline" className="gap-2">
+              <Download className="w-4 h-4" />
+              엑셀 다운로드
+            </Button>
           </div>
         </CardContent>
       </Card>
 
-      <Card className="border-2 border-gray-200">
+      {/* 목록 */}
+      <Card className="bg-white border border-gray-200">
         <CardHeader>
-          <CardTitle>부과 대상자 목록 ({filteredCandidates.length}건)</CardTitle>
+          <CardTitle className="text-base">
+            부과 대상자 목록 ({filteredCandidates.length}명)
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
             <Table>
-              <TableHeader>
-                <TableRow className="bg-gray-50">
-                  <TableHead className="text-gray-700">지역</TableHead>
-                  <TableHead className="text-gray-700">차량번호</TableHead>
-                  <TableHead className="text-gray-700">성명</TableHead>
-                  <TableHead className="text-gray-700">구분</TableHead>
-                  <TableHead className="text-gray-700">부과시작월</TableHead>
-                  <TableHead className="text-gray-700">부과항목</TableHead>
-                  <TableHead className="text-gray-700">상태</TableHead>
-                  <TableHead className="text-gray-700">작업</TableHead>
+              <TableHeader className="bg-gray-50">
+                <TableRow>
+                  <TableHead className="text-gray-700 font-semibold">차량번호</TableHead>
+                  <TableHead className="text-gray-700 font-semibold">성명</TableHead>
+                  <TableHead className="text-gray-700 font-semibold">구분</TableHead>
+                  <TableHead className="text-gray-700 font-semibold">부과항목</TableHead>
+                  <TableHead className="text-gray-700 font-semibold">계산 근거</TableHead>
+                  <TableHead className="text-gray-700 font-semibold">부과시작월</TableHead>
+                  <TableHead className="text-gray-700 font-semibold">상태</TableHead>
+                  <TableHead className="text-gray-700 font-semibold">작업</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredCandidates.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={8} className="text-center py-8 text-gray-500">
-                      데이터가 없습니다.
+                      부과 대상이 없습니다.
                     </TableCell>
                   </TableRow>
                 ) : (
                   filteredCandidates.map((candidate: any) => (
-                    <TableRow key={candidate.id} className="hover:bg-gray-50">
-                      <TableCell className="text-sm">{candidate.region}</TableCell>
-                      <TableCell className="text-sm font-medium">{candidate.vehicleNo}</TableCell>
-                      <TableCell className="text-sm">{candidate.name}</TableCell>
-                      <TableCell className="text-sm">{candidate.memberType}</TableCell>
-                      <TableCell className="text-sm">{candidate.billingStartMonth}</TableCell>
-                      <TableCell className="text-sm">{candidate.billingType}</TableCell>
-                      <TableCell>
+                    <TableRow key={candidate.id} className="hover:bg-gray-50 border-b border-gray-200">
+                      <TableCell className="text-sm font-medium text-gray-900">{candidate.vehicleNo}</TableCell>
+                      <TableCell className="text-sm text-gray-900">{candidate.name}</TableCell>
+                      <TableCell className="text-sm text-gray-900">{candidate.memberType}</TableCell>
+                      <TableCell className="text-sm">
+                        <Badge
+                          className={
+                            candidate.billingType === "협회비"
+                              ? "bg-green-100 text-green-800"
+                              : candidate.billingType === "관리비"
+                                ? "bg-blue-100 text-blue-800"
+                                : "bg-yellow-100 text-yellow-800"
+                          }
+                        >
+                          {candidate.billingType}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-gray-600">
+                        {getCalculationReason(
+                          candidate.memberType,
+                          candidate.joinDate,
+                          candidate.certificateDate,
+                          candidate.billingType
+                        )}
+                      </TableCell>
+                      <TableCell className="text-sm text-gray-900">{candidate.billingStartMonth || "-"}</TableCell>
+                      <TableCell className="text-sm">
                         <Badge className={`${STATUS_COLORS[candidate.status]?.bg} ${STATUS_COLORS[candidate.status]?.text}`}>
                           {candidate.status}
                         </Badge>

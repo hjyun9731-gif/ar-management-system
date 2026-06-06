@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Loader2, Download, Filter } from "lucide-react";
+import { Loader2, Download, Filter, AlertCircle } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 
 const REFLECT_STATUS_COLORS: Record<string, { bg: string; text: string }> = {
@@ -119,20 +119,18 @@ export default function ClosureEvents() {
               <TableHeader>
                 <TableRow className="bg-gray-50">
                   <TableHead className="text-gray-700">구분</TableHead>
-                  <TableHead className="text-gray-700">관리번호</TableHead>
-                  <TableHead className="text-gray-700">지역</TableHead>
                   <TableHead className="text-gray-700">차량번호</TableHead>
                   <TableHead className="text-gray-700">성명</TableHead>
                   <TableHead className="text-gray-700">처리일자</TableHead>
-                  <TableHead className="text-gray-700">미수금액</TableHead>
+                  <TableHead className="text-gray-700">기존 미수금액</TableHead>
+                  <TableHead className="text-gray-700">제외시작월</TableHead>
                   <TableHead className="text-gray-700">반영상태</TableHead>
-                  <TableHead className="text-gray-700">작업</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {closures.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center py-8 text-gray-500">
+                    <TableCell colSpan={7} className="text-center py-8 text-gray-500">
                       데이터가 없습니다.
                     </TableCell>
                   </TableRow>
@@ -140,21 +138,29 @@ export default function ClosureEvents() {
                   closures.map((closure: any) => (
                     <TableRow key={closure.id} className="hover:bg-gray-50">
                       <TableCell className="text-sm font-medium">{closure.closureType}</TableCell>
-                      <TableCell className="text-sm">{closure.managementNo}</TableCell>
-                      <TableCell className="text-sm">{closure.region}</TableCell>
                       <TableCell className="text-sm font-medium">{closure.vehicleNo}</TableCell>
                       <TableCell className="text-sm">{closure.name}</TableCell>
-                      <TableCell className="text-sm">{closure.processDate}</TableCell>
-                      <TableCell className="text-sm font-medium">{closure.unpaidAmountAtClosure?.toLocaleString()}원</TableCell>
+                      <TableCell className="text-sm">{new Date(closure.processDate).toLocaleDateString("ko-KR")}</TableCell>
+                      <TableCell className="text-sm font-medium">
+                        <span>{(closure.unpaidAmountAtClosure || 0).toLocaleString()}원</span>
+                        {closure.unpaidAmountAtClosure > 0 && (
+                          <div className="flex items-center gap-1 text-xs text-red-600 mt-1">
+                            <AlertCircle className="w-3 h-3" />
+                            미수금 있음
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-sm text-gray-900">
+                        {closure.excludeStartMonth ? (
+                          <span className="font-medium">{closure.excludeStartMonth}</span>
+                        ) : (
+                          <span className="text-gray-500">-</span>
+                        )}
+                      </TableCell>
                       <TableCell>
                         <Badge className={`${REFLECT_STATUS_COLORS[closure.reflectStatus]?.bg} ${REFLECT_STATUS_COLORS[closure.reflectStatus]?.text}`}>
                           {closure.reflectStatus}
                         </Badge>
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        <Button variant="outline" size="sm">
-                          상세
-                        </Button>
                       </TableCell>
                     </TableRow>
                   ))

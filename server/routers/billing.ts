@@ -15,9 +15,26 @@ import {
 import { TRPCError } from "@trpc/server";
 
 // 부과시작월 자동 계산 함수
-function calculateBillingStartMonth(registrationDate: string | Date, certificateDate?: string | Date): string {
-  const date = new Date(registrationDate || certificateDate || new Date());
-  const nextMonth = new Date(date.getFullYear(), date.getMonth() + 1, 1);
+// 택배회원: certificateDate 기준 다음 달
+// 개인회원: joinDate 기준 다음 달
+function calculateBillingStartMonth(
+  memberType: string,
+  joinDate?: string | Date,
+  certificateDate?: string | Date
+): string | null {
+  let baseDate: Date | null = null;
+
+  if (memberType === "택배회원" && certificateDate) {
+    baseDate = new Date(certificateDate);
+  } else if (memberType === "개인회원" && joinDate) {
+    baseDate = new Date(joinDate);
+  }
+
+  if (!baseDate) {
+    return null; // 필수 날짜 없음
+  }
+
+  const nextMonth = new Date(baseDate.getFullYear(), baseDate.getMonth() + 1, 1);
   return `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}`;
 }
 
@@ -51,14 +68,31 @@ async function checkDuplicate(data: {
 }
 
 // 부과항목 결정 함수
-function determineBillingType(memberType: string, joinDate?: string, certificateDate?: string): string {
-  if (memberType === "개인회원" && joinDate) {
-    return "협회비";
+// 택배회원: certificateDate 존재 시만 관리비
+// 개인회원: joinDate 존재 시만 협회비
+// 필수 날짜 없으면 확인필요
+function determineBillingType(
+  memberType: string,
+  joinDate?: string | Date,
+  certificateDate?: string | Date
+): { billingType: string; status: string } {
+  if (memberType === "개인회원") {
+    if (joinDate) {
+      return { billingType: "협회비", status: "대기" };
+    } else {
+      return { billingType: "확인필요", status: "확인필요" };
+    }
   }
-  if (memberType === "택배회원" && certificateDate) {
-    return "관리비";
+
+  if (memberType === "택배회원") {
+    if (certificateDate) {
+      return { billingType: "관리비", status: "대기" };
+    } else {
+      return { billingType: "확인필요", status: "확인필요" };
+    }
   }
-  return "협회비"; // 기본값
+
+  return { billingType: "확인필요", status: "확인필요" };
 }
 
 export const billingRouter = router({
@@ -122,12 +156,13 @@ export const billingRouter = router({
 
         // 부과시작월 계산
         const billingStartMonth = calculateBillingStartMonth(
-          input.registrationDate,
+          input.memberType,
+          input.joinDate,
           input.certificateDate
         );
 
         // 부과항목 결정
-        const billingType = determineBillingType(
+        const { billingType, status: determinedStatus } = determineBillingType(
           input.memberType,
           input.joinDate,
           input.certificateDate
@@ -155,24 +190,32 @@ export const billingRouter = router({
           memo: input.memo,
           memberType: input.memberType,
           billingType,
-          billingStartMonth,
-          status: "대기",
+          billingStartMonth: billingStartMonth || "",  // 부과시작월 없으면 빈 문자열
+          status: determinedStatus,
         });
 
         const candidateId = result?.insertId || 1;
 
         // 연동 로그 기록
+        const logMessage =
+          determinedStatus === "확인필요"
+            ? `필수 정보 부족 - ${input.memberType === "개인회원" ? "joinDate" : "certificateDate"} 확인 필요`
+            : `${billingType} 대상자로 등록 (부과시작월: ${billingStartMonth})`;
+
         await createSyncLog({
           eventType: "REGISTER",
           sourceId: input.sourceSystemId,
           targetId: String(candidateId),
-          status: "SUCCESS",
-          message: "다음 달 부과 대상자로 등록되었습니다.",
+          status: determinedStatus === "확인필요" ? "WARNING" : "SUCCESS",
+          message: logMessage,
         });
 
         return {
-          status: "success",
-          message: "다음 달 부과 대상자로 등록되었습니다.",
+          status: determinedStatus === "확인필요" ? "warning" : "success",
+          message:
+            determinedStatus === "확인필요"
+              ? `필수 정보 부족으로 확인필요 상태로 등록되었습니다.`
+              : `${billingType} 대상자로 등록되었습니다. (부과시작월: ${billingStartMonth})`,
           candidateId,
         };
       } catch (error) {

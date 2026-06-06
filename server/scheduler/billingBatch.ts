@@ -1,4 +1,4 @@
-import { getBillingCandidates, createBillingRecord, createSyncLog } from "../db";
+import { getBillingCandidates, createBillingRecord, createSyncLog, getBillingRecords } from "../db";
 
 const ASSOCIATION_FEE = 10000; // 협회비
 const MANAGEMENT_FEE = 5000; // 관리비
@@ -28,6 +28,23 @@ export async function runMonthlyBillingBatch() {
 
     for (const member of activeMembers) {
       try {
+        // 중복 부과 기록 체크
+        const existingRecords = await getBillingRecords(member.id);
+        const existingList = await existingRecords;
+        const isDuplicate = existingList.some((r: any) => r.billingMonth === currentMonth);
+
+        if (isDuplicate) {
+          // 중복 부과 기록 건너뛰
+          await createSyncLog({
+            eventType: "BILLING",
+            sourceId: `batch-${currentMonth}`,
+            targetId: String(member.id),
+            status: "WARNING",
+            message: `${currentMonth} 부과 기록이 이미 존재합니다. 중복 부과 방지로 건너뛰되었습니다.`,
+          });
+          continue; // 다음 회원으로 진행
+        }
+
         // 부과 금액 결정
         const amount = member.billingType === "관리비" ? MANAGEMENT_FEE : ASSOCIATION_FEE;
 
@@ -52,18 +69,25 @@ export async function runMonthlyBillingBatch() {
           message: `${currentMonth} 부과 반영 완료 (${member.billingType}: ${amount.toLocaleString()}원)`,
         });
       } catch (error) {
-        failCount++;
+        // 중복 방지 중에 실패한 경우는 failCount로 계산되지 않음
+        if (!(error instanceof Error && error.message?.includes("중복"))) {
+          failCount++;
+        }
         const errorMsg = error instanceof Error ? error.message : "알 수 없는 오류";
 
+        // 중복 방지는 WARNING으로 기록
+        const isDuplicateError = errorMsg?.includes("중복");
         await createSyncLog({
           eventType: "BILLING",
           sourceId: `batch-${currentMonth}`,
           targetId: String(member.id),
-          status: "FAIL",
-          message: `${currentMonth} 부과 반영 실패: ${errorMsg}`,
+          status: isDuplicateError ? "WARNING" : "FAIL",
+          message: isDuplicateError ? `${currentMonth} 부과 기록이 이미 존재합니다.` : `${currentMonth} 부과 반영 실패: ${errorMsg}`,
         });
 
-        console.error(`[Billing Batch] Failed to create billing record for member ${member.id}:`, error);
+        if (!isDuplicateError) {
+          console.error(`[Billing Batch] Failed to create billing record for member ${member.id}:`, error);
+        }
       }
     }
 
@@ -102,6 +126,23 @@ export async function runManualBillingBatch(month: string) {
 
     for (const member of activeMembers) {
       try {
+        // 중복 부과 기록 체크
+        const existingRecords = await getBillingRecords(member.id);
+        const existingList = await existingRecords;
+        const isDuplicate = existingList.some((r: any) => r.billingMonth === month);
+
+        if (isDuplicate) {
+          // 중복 부과 기록 건너뛰
+          await createSyncLog({
+            eventType: "BILLING_MANUAL",
+            sourceId: `manual-${month}`,
+            targetId: String(member.id),
+            status: "WARNING",
+            message: `${month} 부과 기록이 이미 존재합니다. 중복 부과 방지로 건너뛰되었습니다.`,
+          });
+          continue; // 다음 회원으로 진행
+        }
+
         const amount = member.billingType === "관리비" ? MANAGEMENT_FEE : ASSOCIATION_FEE;
 
         await createBillingRecord({
@@ -123,15 +164,20 @@ export async function runManualBillingBatch(month: string) {
           message: `${month} 부과 반영 완료 (수동 실행, ${member.billingType}: ${amount.toLocaleString()}원)`,
         });
       } catch (error) {
-        failCount++;
+        // 중복 방지 중에 실패한 경우는 failCount로 계산되지 않음
+        if (!(error instanceof Error && error.message?.includes("중복"))) {
+          failCount++;
+        }
         const errorMsg = error instanceof Error ? error.message : "알 수 없는 오류";
 
+        // 중복 방지는 WARNING으로 기록
+        const isDuplicateError = errorMsg?.includes("중복");
         await createSyncLog({
           eventType: "BILLING_MANUAL",
           sourceId: `manual-${month}`,
           targetId: String(member.id),
-          status: "FAIL",
-          message: `${month} 부과 반영 실패: ${errorMsg}`,
+          status: isDuplicateError ? "WARNING" : "FAIL",
+          message: isDuplicateError ? `${month} 부과 기록이 이미 존재합니다.` : `${month} 부과 반영 실패: ${errorMsg}`,
         });
       }
     }
