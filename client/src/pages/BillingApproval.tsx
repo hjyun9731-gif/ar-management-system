@@ -1,11 +1,90 @@
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Loader2, Eye } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Eye, CalendarCheck, Users, TrendingUp } from "lucide-react";
 import { BillingPreviewModal } from "@/components/BillingPreviewModal";
 import { trpc } from "@/lib/trpc";
+
+function MonthSummaryCard({
+  month,
+  label,
+  count,
+  estimatedAmount,
+  variant,
+  onAction,
+  actionLabel,
+}: {
+  month: string;
+  label: string;
+  count: number;
+  estimatedAmount: number;
+  variant: "primary" | "secondary";
+  onAction: () => void;
+  actionLabel: string;
+}) {
+  const isPrimary = variant === "primary";
+  return (
+    <Card className={`bg-white border rounded-xl shadow-sm ${isPrimary ? "border-indigo-200" : "border-slate-200"}`}>
+      <CardHeader className={`pb-3 pt-4 px-5 border-b ${isPrimary ? "border-indigo-100 bg-indigo-50/40" : "border-slate-100"}`}>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+            <CalendarCheck className={`w-4 h-4 ${isPrimary ? "text-indigo-600" : "text-slate-400"}`} />
+            {label}
+          </CardTitle>
+          <span className={`text-xs font-mono font-medium px-2 py-0.5 rounded-full ${isPrimary ? "bg-indigo-100 text-indigo-700" : "bg-slate-100 text-slate-600"}`}>
+            {month}
+          </span>
+        </div>
+      </CardHeader>
+      <CardContent className="px-5 py-4">
+        <div className="grid grid-cols-3 gap-4 mb-4">
+          <div>
+            <div className="flex items-center gap-1.5 mb-1">
+              <Users className="w-3.5 h-3.5 text-slate-400" />
+              <span className="text-xs text-slate-500 font-medium">부과 대상</span>
+            </div>
+            <div className={`text-2xl font-bold tabular-nums ${isPrimary ? "text-indigo-700" : "text-slate-700"}`}>
+              {count}
+            </div>
+            <div className="text-xs text-slate-400 mt-0.5">건</div>
+          </div>
+          <div>
+            <div className="flex items-center gap-1.5 mb-1">
+              <TrendingUp className="w-3.5 h-3.5 text-slate-400" />
+              <span className="text-xs text-slate-500 font-medium">예상 부과액</span>
+            </div>
+            <div className={`text-2xl font-bold tabular-nums ${isPrimary ? "text-indigo-700" : "text-slate-700"}`}>
+              {estimatedAmount.toLocaleString()}
+            </div>
+            <div className="text-xs text-slate-400 mt-0.5">원</div>
+          </div>
+          <div className="flex flex-col justify-end">
+            <Button
+              onClick={onAction}
+              size="sm"
+              className={`gap-1.5 ${isPrimary ? "bg-indigo-600 hover:bg-indigo-700" : "bg-slate-700 hover:bg-slate-800"}`}
+            >
+              <Eye className="w-3.5 h-3.5" />
+              {actionLabel}
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function TableSkeleton() {
+  return (
+    <div className="space-y-2 py-2">
+      {[...Array(4)].map((_, i) => (
+        <div key={i} className="h-16 bg-slate-100 rounded-lg animate-pulse" />
+      ))}
+    </div>
+  );
+}
 
 export default function BillingApproval() {
   const [selectedMonth, setSelectedMonth] = useState<string>("");
@@ -20,7 +99,6 @@ export default function BillingApproval() {
     setPreviewOpen(true);
   };
 
-  // 현재 월과 다음 월 계산
   const now = new Date();
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const nextMonth = `${now.getFullYear()}-${String(now.getMonth() + 2).padStart(2, "0")}`;
@@ -28,146 +106,101 @@ export default function BillingApproval() {
   const thisMonthCandidates = candidates.filter((c: any) => c.billingStartMonth === currentMonth);
   const nextMonthCandidates = candidates.filter((c: any) => c.billingStartMonth === nextMonth);
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <Loader2 className="animate-spin w-8 h-8 text-muted-foreground" />
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-6 p-8">
-      <div className="space-y-2">
-        <h1 className="text-3xl font-bold text-gray-900">이번 달 부과 예정</h1>
-        <p className="text-gray-600">부과 대상자 현황 및 부과 반영 관리</p>
+    <div className="p-6 space-y-5 max-w-7xl">
+      {/* Header */}
+      <div>
+        <h1 className="text-xl font-bold text-slate-900">이번 달 부과 예정</h1>
+        <p className="text-sm text-slate-500 mt-0.5">부과 대상자 현황 및 부과 반영 관리</p>
       </div>
 
-      {/* 부과 월 선택 */}
-      <Card className="border-2 border-gray-200">
-        <CardHeader>
-          <CardTitle className="text-base">부과 월 선택</CardTitle>
+      {/* Month Selector */}
+      <Card className="bg-white border border-slate-200 rounded-xl shadow-sm">
+        <CardHeader className="pb-3 pt-4 px-5 border-b border-slate-100">
+          <CardTitle className="text-sm font-semibold text-slate-700">부과 월 직접 선택</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">부과 월 (YYYY-MM)</label>
-              <div className="flex gap-2">
-                <Input
-                  type="month"
-                  value={selectedMonth}
-                  onChange={(e) => setSelectedMonth(e.target.value)}
-                  placeholder="부과 월을 선택하세요"
-                />
-                <Button
-                  onClick={() => handlePreview(selectedMonth)}
-                  disabled={!selectedMonth}
-                  className="bg-blue-600 hover:bg-blue-700"
-                >
-                  <Eye className="w-4 h-4 mr-2" />
-                  미리보기
-                </Button>
-              </div>
+        <CardContent className="px-5 py-4">
+          <div className="flex items-end gap-3 max-w-sm">
+            <div className="flex-1">
+              <label className="text-xs font-medium text-slate-600 block mb-1.5">부과 월 (YYYY-MM)</label>
+              <Input
+                type="month"
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                className="h-9 text-sm"
+              />
             </div>
+            <Button
+              onClick={() => handlePreview(selectedMonth)}
+              disabled={!selectedMonth}
+              size="sm"
+              className="gap-1.5 bg-indigo-600 hover:bg-indigo-700 h-9"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              미리보기
+            </Button>
           </div>
         </CardContent>
       </Card>
 
-      {/* 이번 달 부과 예정 */}
-      <Card className="border-2 border-blue-200 bg-blue-50">
-        <CardHeader>
-          <CardTitle className="text-base text-blue-900">이번 달 부과 예정 ({currentMonth})</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-white rounded-lg p-4 border border-blue-200">
-              <p className="text-sm text-gray-600">부과 대상</p>
-              <p className="text-3xl font-bold text-blue-600 mt-2">{thisMonthCandidates.length}</p>
-              <p className="text-xs text-gray-500 mt-1">건</p>
-            </div>
-            <div className="bg-white rounded-lg p-4 border border-blue-200">
-              <p className="text-sm text-gray-600">예상 부과액</p>
-              <p className="text-3xl font-bold text-blue-600 mt-2">
-                {(thisMonthCandidates.length * 15000).toLocaleString()}
-              </p>
-              <p className="text-xs text-gray-500 mt-1">원</p>
-            </div>
-            <div className="bg-white rounded-lg p-4 border border-blue-200 flex flex-col justify-between">
-              <p className="text-sm text-gray-600">상태</p>
-              <Button
-                onClick={() => handlePreview(currentMonth)}
-                className="mt-4 bg-blue-600 hover:bg-blue-700"
-              >
-                <Eye className="w-4 h-4 mr-2" />
-                부과 반영
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      {/* Month Summary Cards */}
+      {isLoading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {[0, 1].map((i) => (
+            <Card key={i} className="bg-white border border-slate-200 rounded-xl shadow-sm">
+              <CardContent className="px-5 py-4">
+                <TableSkeleton />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <MonthSummaryCard
+            month={currentMonth}
+            label="이번 달 부과 예정"
+            count={thisMonthCandidates.length}
+            estimatedAmount={thisMonthCandidates.length * 15000}
+            variant="primary"
+            onAction={() => handlePreview(currentMonth)}
+            actionLabel="부과 반영"
+          />
+          <MonthSummaryCard
+            month={nextMonth}
+            label="다음 달 부과 예정"
+            count={nextMonthCandidates.length}
+            estimatedAmount={nextMonthCandidates.length * 15000}
+            variant="secondary"
+            onAction={() => handlePreview(nextMonth)}
+            actionLabel="미리보기"
+          />
+        </div>
+      )}
 
-      {/* 다음 달 부과 예정 */}
-      <Card className="border-2 border-green-200 bg-green-50">
-        <CardHeader>
-          <CardTitle className="text-base text-green-900">다음 달 부과 예정 ({nextMonth})</CardTitle>
+      {/* Recent billing history */}
+      <Card className="bg-white border border-slate-200 rounded-xl shadow-sm">
+        <CardHeader className="pb-3 pt-4 px-5 border-b border-slate-100">
+          <CardTitle className="text-sm font-semibold text-slate-700">최근 부과 반영 이력</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-white rounded-lg p-4 border border-green-200">
-              <p className="text-sm text-gray-600">부과 대상</p>
-              <p className="text-3xl font-bold text-green-600 mt-2">{nextMonthCandidates.length}</p>
-              <p className="text-xs text-gray-500 mt-1">건</p>
-            </div>
-            <div className="bg-white rounded-lg p-4 border border-green-200">
-              <p className="text-sm text-gray-600">예상 부과액</p>
-              <p className="text-3xl font-bold text-green-600 mt-2">
-                {(nextMonthCandidates.length * 15000).toLocaleString()}
-              </p>
-              <p className="text-xs text-gray-500 mt-1">원</p>
-            </div>
-            <div className="bg-white rounded-lg p-4 border border-green-200 flex flex-col justify-between">
-              <p className="text-sm text-gray-600">상태</p>
-              <Button
-                onClick={() => handlePreview(nextMonth)}
-                variant="outline"
-                className="mt-4"
-              >
-                <Eye className="w-4 h-4 mr-2" />
-                미리보기
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* 부과 반영 이력 */}
-      <Card className="border-2 border-gray-200">
-        <CardHeader>
-          <CardTitle className="text-base">최근 부과 반영 이력</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-              <div>
-                <p className="text-sm font-medium text-gray-900">2026년 6월 부과</p>
-                <p className="text-xs text-gray-500 mt-1">2026-06-01 10:30:00</p>
+        <CardContent className="px-5 py-3">
+          <div className="space-y-1">
+            {[
+              { month: "2026년 6월 부과", date: "2026-06-01 10:30", count: 145 },
+              { month: "2026년 5월 부과", date: "2026-05-01 09:15", count: 142 },
+            ].map((item) => (
+              <div key={item.month} className="flex items-center justify-between py-3 border-b border-slate-50 last:border-0">
+                <div>
+                  <p className="text-sm font-medium text-slate-800">{item.month}</p>
+                  <p className="text-xs text-slate-400 mt-0.5 font-mono">{item.date}</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="inline-flex items-center text-xs font-medium rounded-full px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    완료
+                  </span>
+                  <span className="text-sm font-semibold text-slate-700 tabular-nums">{item.count}건</span>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Badge className="bg-green-100 text-green-800">완료</Badge>
-                <span className="text-sm font-medium text-gray-900">145건</span>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-              <div>
-                <p className="text-sm font-medium text-gray-900">2026년 5월 부과</p>
-                <p className="text-xs text-gray-500 mt-1">2026-05-01 09:15:00</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge className="bg-green-100 text-green-800">완료</Badge>
-                <span className="text-sm font-medium text-gray-900">142건</span>
-              </div>
-            </div>
+            ))}
           </div>
         </CardContent>
       </Card>
