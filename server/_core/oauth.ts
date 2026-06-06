@@ -1,8 +1,10 @@
 import { COOKIE_NAME, ONE_YEAR_MS } from "@shared/const";
 import type { Express, Request, Response } from "express";
+import express from "express";
 import * as db from "../db";
 import { getSessionCookieOptions } from "./cookies";
 import { sdk } from "./sdk";
+import { isSimpleAdminEnabled, verifySimpleAdminPassword, createSimpleAdminSession } from "./simpleAuth";
 
 function getQueryParam(req: Request, key: string): string | undefined {
   const value = req.query[key];
@@ -10,6 +12,29 @@ function getQueryParam(req: Request, key: string): string | undefined {
 }
 
 export function registerOAuthRoutes(app: Express) {
+  // Simple admin login endpoint (used when OAuth is disabled)
+  app.post("/api/auth/simple-login", express.json(), async (req: Request, res: Response) => {
+    if (!isSimpleAdminEnabled()) {
+      res.status(403).json({ error: "Simple admin auth is not enabled" });
+      return;
+    }
+
+    const { password } = req.body;
+    if (!password) {
+      res.status(400).json({ error: "password is required" });
+      return;
+    }
+
+    if (!verifySimpleAdminPassword(password)) {
+      res.status(401).json({ error: "Invalid password" });
+      return;
+    }
+
+    createSimpleAdminSession(req, res);
+    res.json({ success: true, message: "Login successful" });
+  });
+
+  // OAuth callback (used when OAuth is enabled)
   app.get("/api/oauth/callback", async (req: Request, res: Response) => {
     const code = getQueryParam(req, "code");
     const state = getQueryParam(req, "state");
@@ -49,5 +74,12 @@ export function registerOAuthRoutes(app: Express) {
       console.error("[OAuth] Callback failed", error);
       res.status(500).json({ error: "OAuth callback failed" });
     }
+  });
+
+  // Logout endpoint
+  app.post("/api/auth/logout", (req: Request, res: Response) => {
+    const cookieOptions = getSessionCookieOptions(req);
+    res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+    res.json({ success: true, message: "Logout successful" });
   });
 }

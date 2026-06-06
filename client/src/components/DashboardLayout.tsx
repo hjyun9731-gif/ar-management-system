@@ -1,10 +1,12 @@
-import { useAuth } from "@/_core/hooks/useAuth";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { LogOut, Settings, BarChart3, Users, Trash2, FileText, Zap, CheckCircle2 } from "lucide-react";
+import { LogOut, Settings, BarChart3, Users, Trash2, FileText, Zap, Lock } from "lucide-react";
 import { useLocation } from "wouter";
-import { getLoginUrl } from "@/const";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
+import { useAuth } from "@/_core/hooks/useAuth";
+import { toast } from "sonner";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -20,22 +22,110 @@ const NAV_ITEMS = [
 ];
 
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
-  const [location] = useLocation();
+  const [location, navigate] = useLocation();
   const { user, loading, logout } = useAuth();
+  const [showSimpleLogin, setShowSimpleLogin] = useState(false);
+  const [password, setPassword] = useState("");
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  const handleSimpleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoggingIn(true);
+
+    try {
+      const response = await fetch("/api/auth/simple-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        toast.error(error.error || "로그인 실패");
+        return;
+      }
+
+      toast.success("로그인 성공");
+      setPassword("");
+      setShowSimpleLogin(false);
+      // Reload to refresh auth state
+      window.location.reload();
+    } catch (error) {
+      toast.error("로그인 중 오류 발생");
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      toast.success("로그아웃 되었습니다");
+      navigate("/");
+    } catch (error) {
+      toast.error("로그아웃 중 오류 발생");
+    }
+  };
 
   if (loading) {
     return <DashboardLayoutSkeleton />;
   }
 
+  // Show simple login if no user
   if (!user) {
     return (
       <div className="flex items-center justify-center h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-        <div className="text-center space-y-6">
-          <h1 className="text-4xl font-bold text-gray-900">협회비·관리비 부과 관리</h1>
-          <p className="text-gray-600 text-lg">관리자 로그인이 필요합니다</p>
-          <Button size="lg" onClick={() => (window.location.href = getLoginUrl())} className="bg-blue-600 hover:bg-blue-700">
-            로그인
-          </Button>
+        <div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full space-y-6">
+          <div className="text-center space-y-2">
+            <div className="flex justify-center mb-4">
+              <Lock className="w-12 h-12 text-blue-600" />
+            </div>
+            <h1 className="text-2xl font-bold text-gray-900">협회비·관리비 부과 관리</h1>
+            <p className="text-gray-600">관리자 접근</p>
+          </div>
+
+          {!showSimpleLogin ? (
+            <Button
+              onClick={() => setShowSimpleLogin(true)}
+              className="w-full bg-blue-600 hover:bg-blue-700 h-10"
+            >
+              관리자 로그인
+            </Button>
+          ) : (
+            <form onSubmit={handleSimpleLogin} className="space-y-4">
+              <div>
+                <label className="text-sm font-medium text-gray-700">관리자 비밀번호</label>
+                <Input
+                  type="password"
+                  placeholder="비밀번호 입력"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="mt-1"
+                  autoFocus
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setShowSimpleLogin(false);
+                    setPassword("");
+                  }}
+                  className="flex-1"
+                >
+                  취소
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isLoggingIn || !password}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700"
+                >
+                  {isLoggingIn ? "로그인 중..." : "로그인"}
+                </Button>
+              </div>
+            </form>
+          )}
         </div>
       </div>
     );
@@ -51,16 +141,19 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             <p className="text-xs text-gray-400">협회비·관리비</p>
           </div>
         </div>
-        <nav className="flex-1 overflow-y-auto p-4 space-y-2">
+
+        <nav className="flex-1 overflow-y-auto py-4 space-y-1 px-3">
           {NAV_ITEMS.map((item) => {
-            const isActive = location === item.href;
             const Icon = item.icon;
+            const isActive = location === item.href;
             return (
               <a
                 key={item.href}
                 href={item.href}
-                className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
-                  isActive ? "bg-blue-600 text-white shadow-lg" : "text-gray-300 hover:bg-gray-700 hover:text-white"
+                className={`flex items-center gap-3 px-4 py-2 rounded-lg transition-colors ${
+                  isActive
+                    ? "bg-blue-600 text-white"
+                    : "text-gray-300 hover:bg-gray-700 hover:text-white"
                 }`}
               >
                 <Icon className="w-5 h-5" />
@@ -69,63 +162,56 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             );
           })}
         </nav>
+
+        {/* User Profile */}
         <div className="border-t border-gray-700 p-4">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center">
-              <span className="text-white font-bold text-sm">{user.name?.charAt(0) || "A"}</span>
+          <div className="flex items-center justify-between">
+            <div className="flex-1">
+              <p className="text-sm font-medium text-white">{user.name || "Administrator"}</p>
+              <p className="text-xs text-gray-400">{user.email || "admin@internal"}</p>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-white truncate">{user.name || "관리자"}</p>
-              <p className="text-xs text-gray-400 truncate">{user.email}</p>
-            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="p-1 hover:bg-gray-700 rounded-lg transition-colors">
+                  <Settings className="w-5 h-5 text-gray-300" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuItem onClick={handleLogout} className="text-red-600 cursor-pointer">
+                  <LogOut className="w-4 h-4 mr-2" />
+                  로그아웃
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => logout()}
-            className="w-full text-gray-300 border-gray-600 hover:bg-gray-700 hover:text-white"
-          >
-            <LogOut className="w-4 h-4 mr-2" />
-            로그아웃
-          </Button>
         </div>
       </aside>
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top Bar */}
-        <header className="h-20 border-b bg-white shadow-sm flex items-center justify-between px-6">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">협회비·관리비 부과 관리</h1>
-            <p className="text-sm text-gray-500">관리자 시스템</p>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="hidden md:block text-right">
-              <p className="text-sm font-medium text-gray-900">{user.name || "관리자"}</p>
-              <p className="text-xs text-gray-500">{user.email}</p>
-            </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="rounded-full w-10 h-10 bg-blue-100 hover:bg-blue-200">
-                  <span className="text-blue-600 font-bold">{user.name?.charAt(0) || "A"}</span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuItem>
-                  <Settings className="mr-2 h-4 w-4" />
-                  설정
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => logout()}>
-                  <LogOut className="mr-2 h-4 w-4" />
-                  로그아웃
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+        <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+          <div className="flex-1" />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-100 transition-colors">
+                <div className="text-right">
+                  <p className="text-sm font-medium text-gray-900">{user.name || "Administrator"}</p>
+                  <p className="text-xs text-gray-500">{user.email || "admin@internal"}</p>
+                </div>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem onClick={handleLogout} className="text-red-600 cursor-pointer">
+                <LogOut className="w-4 h-4 mr-2" />
+                로그아웃
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </header>
 
-        {/* Content Area */}
-        <main className="flex-1 overflow-y-auto">{children}</main>
+        {/* Content */}
+        <main className="flex-1 overflow-auto">{children}</main>
       </div>
     </div>
   );
