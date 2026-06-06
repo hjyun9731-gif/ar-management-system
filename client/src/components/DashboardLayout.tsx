@@ -1,7 +1,7 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { LogOut, Settings, BarChart3, Users, Trash2, FileText, Zap } from "lucide-react";
+import { LogOut, Settings, BarChart3, Users, Trash2, FileText, Zap, CheckCircle2 } from "lucide-react";
 import { useLocation } from "wouter";
 import { getLoginUrl } from "@/const";
 import { DashboardLayoutSkeleton } from "./DashboardLayoutSkeleton";
@@ -13,6 +13,7 @@ interface DashboardLayoutProps {
 const NAV_ITEMS = [
   { label: "대시보드", href: "/", icon: BarChart3 },
   { label: "다음 달 부과 대상", href: "/candidates", icon: Users },
+  { label: "이번 달 부과 예정", href: "/approval", icon: FileText },
   { label: "폐업 현황", href: "/closures", icon: Trash2 },
   { label: "납부현황", href: "/billing-records", icon: FileText },
   { label: "연동 로그", href: "/sync-logs", icon: Zap },

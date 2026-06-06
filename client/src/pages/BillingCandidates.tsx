@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Loader2, Download, Search, Filter } from "lucide-react";
 import { trpc } from "@/lib/trpc";
+import { CandidateDetailModal } from "@/components/CandidateDetailModal";
 
 const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
   대기: { bg: "bg-yellow-100", text: "text-yellow-800" },
@@ -26,6 +27,7 @@ export default function BillingCandidates() {
   });
 
   const [searchText, setSearchText] = useState("");
+  const [selectedCandidateId, setSelectedCandidateId] = useState<number | null>(null);
 
   const { data: candidates = [], isLoading } = trpc.billing.listCandidates.useQuery(filters);
 
@@ -193,7 +195,7 @@ export default function BillingCandidates() {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-sm">
-                        <Button variant="outline" size="sm">
+                        <Button variant="outline" size="sm" onClick={() => setSelectedCandidateId(candidate.id)}>
                           상세
                         </Button>
                       </TableCell>
@@ -205,6 +207,12 @@ export default function BillingCandidates() {
           </div>
         </CardContent>
       </Card>
+
+      <CandidateDetailModal
+        open={selectedCandidateId !== null}
+        onOpenChange={(open) => !open && setSelectedCandidateId(null)}
+        candidateId={selectedCandidateId || 0}
+      />
     </div>
   );
 }

@@ -383,4 +383,16 @@ export const billingRouter = router({
       confirmNeededCount,
     };
   }),
+
+  // 수동 부과 배치 실행
+  runManualBillingBatch: protectedProcedure
+    .input(
+      z.object({
+        month: z.string().regex(/^\d{4}-\d{2}$/, "YYYY-MM 형식이어야 합니다"),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const { runManualBillingBatch } = await import("../scheduler/billingBatch");
+      return await runManualBillingBatch(input.month);
+    }),
 });

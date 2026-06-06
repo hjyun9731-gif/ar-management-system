@@ -1,0 +1,171 @@
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
+import { useState } from "react";
+
+interface BillingPreviewModalProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  month: string;
+}
+
+export function BillingPreviewModal({ open, onOpenChange, month }: BillingPreviewModalProps) {
+  const [isApplying, setIsApplying] = useState(false);
+
+  const { data: candidates = [], isLoading } = trpc.billing.listCandidates.useQuery(
+    { billingStartMonth: month },
+    { enabled: open }
+  );
+
+  const runBatchMutation = trpc.billing.runManualBillingBatch.useMutation({
+    onSuccess: (result) => {
+      toast.success(`부과 반영 완료: ${result.successCount}건 성공, ${result.failCount}건 실패`);
+      onOpenChange(false);
+    },
+    onError: (error) => {
+      toast.error(error.message || "부과 반영 실패");
+    },
+  });
+
+  const handleApplyBilling = () => {
+    setIsApplying(true);
+    runBatchMutation.mutate({ month });
+  };
+
+  const totalAmount = candidates.length * 15000; // 협회비 10,000 + 관리비 5,000
+  const activeMembers = candidates.filter((c: any) => c.status !== "제외");
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{month} 부과 반영 미리보기</DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-6">
+          {/* 요약 정보 */}
+          <div className="grid grid-cols-3 gap-4">
+            <Card className="border-2 border-blue-200 bg-blue-50">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-medium text-gray-700">부과 대상</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-blue-900">{activeMembers.length}</div>
+                <p className="text-xs text-blue-700 mt-1">건</p>
+              </CardContent>
+            </Card>
+
+            <Card className="border-2 border-green-200 bg-green-50">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-medium text-gray-700">부과액 (1인당)</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-green-900">15,000</div>
+                <p className="text-xs text-green-700 mt-1">원</p>
+              </CardContent>
+            </Card>
+
+            <Card className="border-2 border-purple-200 bg-purple-50">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm font-medium text-gray-700">총 부과액</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-purple-900">{totalAmount.toLocaleString()}</div>
+                <p className="text-xs text-purple-700 mt-1">원</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* 부과 항목 설명 */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">부과 항목</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-700">협회비</span>
+                <span className="font-medium">10,000원</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-700">관리비</span>
+                <span className="font-medium">5,000원</span>
+              </div>
+              <div className="border-t pt-2 flex justify-between text-sm font-bold">
+                <span>합계</span>
+                <span>15,000원</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* 부과 대상 목록 */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">부과 대상 목록</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto max-h-64 overflow-y-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-gray-50">
+                      <TableHead className="text-gray-700">차량번호</TableHead>
+                      <TableHead className="text-gray-700">성명</TableHead>
+                      <TableHead className="text-gray-700">구분</TableHead>
+                      <TableHead className="text-gray-700">상태</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {activeMembers.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={4} className="text-center py-4 text-gray-500">
+                          부과 대상이 없습니다.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      activeMembers.map((candidate: any) => (
+                        <TableRow key={candidate.id} className="hover:bg-gray-50">
+                          <TableCell className="text-sm font-medium">{candidate.vehicleNo}</TableCell>
+                          <TableCell className="text-sm">{candidate.name}</TableCell>
+                          <TableCell className="text-sm">{candidate.memberType}</TableCell>
+                          <TableCell>
+                            <Badge className="bg-blue-100 text-blue-800">{candidate.status}</Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* 주의 사항 */}
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+            <h4 className="text-sm font-medium text-yellow-900 mb-2">주의사항</h4>
+            <ul className="text-sm text-yellow-800 space-y-1 list-disc list-inside">
+              <li>부과 반영 후에는 취소할 수 없습니다.</li>
+              <li>제외 상태인 회원은 부과되지 않습니다.</li>
+              <li>동일 월에 중복 부과되지 않도록 주의하세요.</li>
+            </ul>
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            취소
+          </Button>
+          <Button
+            onClick={handleApplyBilling}
+            disabled={isApplying || activeMembers.length === 0 || runBatchMutation.isPending}
+            className="bg-blue-600 hover:bg-blue-700"
+          >
+            {isApplying || runBatchMutation.isPending ? "부과 중..." : "부과 반영"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

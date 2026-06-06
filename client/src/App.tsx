@@ -7,6 +7,7 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import DashboardLayout from "./components/DashboardLayout";
 import Dashboard from "./pages/Dashboard";
 import BillingCandidates from "./pages/BillingCandidates";
+import BillingApproval from "./pages/BillingApproval";
 import ClosureEvents from "./pages/ClosureEvents";
 import BillingRecords from "./pages/BillingRecords";
 import SyncLogs from "./pages/SyncLogs";
@@ -20,6 +21,7 @@ function Router() {
             <Switch>
               <Route path="/" component={Dashboard} />
               <Route path="/candidates" component={BillingCandidates} />
+              <Route path="/approval" component={BillingApproval} />
               <Route path="/closures" component={ClosureEvents} />
               <Route path="/billing-records" component={BillingRecords} />
               <Route path="/sync-logs" component={SyncLogs} />
