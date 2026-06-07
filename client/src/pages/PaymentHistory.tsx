@@ -155,9 +155,7 @@ function parsePreparedCsv(fileName: string, csvText: string): ParsedPaymentRow[]
       expectedAmount: expectedIdx >= 0 ? parseMoney(cols[expectedIdx]) : undefined,
       paidAmount: paidIdx >= 0 ? parseMoney(cols[paidIdx]) : 0,
       unpaidAmount: unpaidIdx >= 0 ? parseMoney(cols[unpaidIdx]) : 0,
-      memo: memoIdx >= 0 ? cols[memoIdx] : "정리완료 CSV",
-      rawText: line,
-      raw: cols,
+      memo: memoIdx >= 0 ? cols[memoIdx] : "정리완료 CSV"
     };
   }).filter((row) => row.vehicleNo && row.name && row.billingMonth);
 }
@@ -233,9 +231,7 @@ function parseSheet(fileName: string, sheetName: string, rows: unknown[][]): Par
           expectedAmount: billingType === "관리비" ? 5000 : billingType === "협회비" ? 10000 : undefined,
           paidAmount: 0,
           unpaidAmount,
-          memo: "월별 미수금 칸",
-          rawText: rowText,
-          raw: cells,
+          memo: "월별 미수금 칸"
         });
       }
       continue;
@@ -260,9 +256,7 @@ function parseSheet(fileName: string, sheetName: string, rows: unknown[][]): Par
       expectedAmount: billingType === "관리비" ? 5000 : billingType === "협회비" ? 10000 : undefined,
       paidAmount,
       unpaidAmount,
-      memo: "행 단위 추출",
-      rawText: rowText,
-      raw: cells,
+      memo: "행 단위 추출"
     });
   }
 
@@ -348,13 +342,33 @@ export default function PaymentHistory() {
 
   const saveRows = async () => {
     if (!parsedRows.length) return;
-    const size = 2000;
-    for (let i = 0; i < parsedRows.length; i += size) {
+
+    const compactRows = parsedRows.map((row) => ({
+      sourceFile: row.sourceFile,
+      sourceSheet: row.sourceSheet,
+      sourceRow: row.sourceRow,
+      region: row.region || "",
+      account: row.account || "",
+      vehicleNo: row.vehicleNo,
+      name: row.name,
+      billingMonth: row.billingMonth,
+      billingType: row.billingType || "",
+      expectedAmount: Number(row.expectedAmount || 0),
+      paidAmount: Number(row.paidAmount || 0),
+      unpaidAmount: Number(row.unpaidAmount || 0),
+      memo: row.memo || "",
+    }));
+
+    const size = 200;
+    for (let i = 0; i < compactRows.length; i += size) {
       await importMutation.mutateAsync({
         fileName: "과거 미수금 자료",
-        rows: parsedRows.slice(i, i + size),
+        rows: compactRows.slice(i, i + size),
       });
+      toast.info("저장 진행: " + Math.min(i + size, compactRows.length).toLocaleString() + " / " + compactRows.length.toLocaleString() + "건");
+      await new Promise((resolve) => setTimeout(resolve, 20));
     }
+
     toast.success("과거 납부·미수금 자료 저장 완료");
   };
 
@@ -362,7 +376,7 @@ export default function PaymentHistory() {
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">납부이력 추적</h1>
-        <div className="text-xs text-emerald-600 font-semibold mt-1">v53 실제 CSV/ZIP 파서 화면</div>
+        <div className="text-xs text-emerald-600 font-semibold mt-1">v54 안전 저장 CSV/ZIP 파서 화면</div>
         <p className="text-sm text-slate-500 mt-1">
           현재 부과대상자 기준으로 과거 엑셀/ZIP/CSV 전체 파일과 전체 시트를 읽어 월별 납부·미수금 이력을 매칭합니다.
         </p>
