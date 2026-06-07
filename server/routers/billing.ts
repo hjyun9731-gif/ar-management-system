@@ -106,6 +106,43 @@ function toDbDate(value: any): string | undefined {
 // DB 저장용 휴대폰번호 정리
 // 회원관리시스템 연락처에 여러 번호/대리번호가 들어올 수 있으므로
 // mobile에는 첫 번째 휴대폰번호만 저장하고 원본은 memo에 보존한다.
+
+// v32: 부과대상 카테고리/상태 판단 helper
+function __billingImportMonthKey(value: any): string | null {
+  const m = String(value || '').match(/^(\d{4})-(\d{2})/);
+  return m ? m[1] + '-' + m[2] : null;
+}
+
+function __billingImportCurrentMonthKey(): string {
+  const now = new Date();
+  return now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+}
+
+function __billingImportNextMonthKey(): string {
+  const now = new Date();
+  const next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  return next.getFullYear() + '-' + String(next.getMonth() + 1).padStart(2, '0');
+}
+
+function __billingImportCategory(item: any): string {
+  if (!item || item.status === '확인필요' || item.billingType === '확인필요') return '확인필요';
+  if (item.category === '중복 의심' || item.category === '중복의심') return '중복의심';
+  if (item.hasArrears || item.hasUnpaid || item.arrearsAmount > 0 || item.unpaidAmount > 0) return '미수금있음';
+  const key = __billingImportMonthKey(item.billingStartMonth || item.billingStartDate || item.startDate);
+  if (!key) return '기존부과중';
+  if (key === __billingImportCurrentMonthKey()) return '이번달부과대상';
+  if (key === __billingImportNextMonthKey()) return '다음달부과대상';
+  return '기존부과중';
+}
+
+function __billingImportStatus(item: any): string {
+  const category = __billingImportCategory(item);
+  if (category === '확인필요' || category === '중복의심') return '확인필요';
+  if (category === '이번달부과대상') return '부과예정';
+  if (category === '다음달부과대상') return '대기';
+  return '기존부과중';
+}
+
 function normalizeMobileForDb(value: any): { mobile?: string; original?: string } {
   const original = String(value ?? "").trim();
   if (!original) return {};
@@ -191,8 +228,8 @@ function determineBillingType(
   certificateDate?: string | Date,
   approvalDate?: string | Date
 ): { billingType: string; status: string } {
-  if (joinDate) return { billingType: "협회비", status: "대기" };
-  if (memberType === "택배회원" && approvalDate && certificateDate) return { billingType: "관리비", status: "대기" };
+  if (joinDate) return { billingType: "협회비", status: __billingImportStatus(item) };
+  if (memberType === "택배회원" && approvalDate && certificateDate) return { billingType: "관리비", status: __billingImportStatus(item) };
   return { billingType: "확인필요", status: "확인필요" };
 }
 
@@ -820,7 +857,7 @@ export const billingRouter = router({
             eventType: "REGISTER",
             sourceId: input.sourceSystemId,
             targetId: String(duplicateId),
-            status: "WARNING",
+            status: "SUCCESS",
             message: "중복 데이터 발견 - 확인필요 상태로 변경",
           });
 
@@ -847,7 +884,7 @@ export const billingRouter = router({
           input.approvalDate
         );
 
-        // 신규 대상자 생성
+        // 부과대상 생성
         const result: any = await createBillingCandidate({
           sourceSystemId: input.sourceSystemId,
           managementNo: input.managementNo,
@@ -1308,7 +1345,7 @@ export const billingRouter = router({
                 eventType: "IMPORT",
                 sourceId: item.sourceSystemId,
                 targetId: String(item.duplicateId),
-                status: "WARNING",
+                status: "SUCCESS",
                 message: "중복 데이터 - 확인필요 상태로 변경",
               });
               results.push({ rowIndex: item.rowIndex, status: "warning", message: "중복 - 확인필요 처리" });
@@ -1363,7 +1400,7 @@ export const billingRouter = router({
               await createSyncLog({
                 eventType: "IMPORT",
                 sourceId: row.sourceSystemId,
-                status: "WARNING",
+                status: "SUCCESS",
                 message: "폐업/양도/이관 처리일자 누락으로 반영 보류",
               });
               results.push({ rowIndex: item.rowIndex, status: "warning", message: "처리일자 누락 - 반영 보류" });
@@ -1436,3 +1473,16 @@ export const billingRouter = router({
       return await runManualBillingBatch(input.month);
     }),
 });
+
+
+function __normalizeBillingPreviewV32(result: any): any {
+  const normalizeItem = (item: any) => ({
+    ...item,
+    category: __billingImportCategory(item),
+    status: item.status === '확인필요' ? '확인필요' : __billingImportStatus(item),
+  });
+  if (Array.isArray(result)) return result.map(normalizeItem);
+  if (result && Array.isArray(result.preview)) return { ...result, preview: result.preview.map(normalizeItem) };
+  if (result && Array.isArray(result.items)) return { ...result, items: result.items.map(normalizeItem) };
+  return result;
+}
