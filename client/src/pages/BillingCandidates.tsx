@@ -11,6 +11,8 @@ import { CandidateDetailModal } from "@/components/CandidateDetailModal";
 import { toast } from "sonner";
 
 const STATUS_STYLE: Record<string, string> = {
+  기존부과중: "bg-slate-50 text-slate-700 border border-slate-200",
+  반영완료: "bg-emerald-50 text-emerald-700 border border-emerald-200",
   대기: "bg-amber-50 text-amber-700 border border-amber-200",
   부과예정: "bg-sky-50 text-sky-700 border border-sky-200",
   부과반영완료: "bg-emerald-50 text-emerald-700 border border-emerald-200",

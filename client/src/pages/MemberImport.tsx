@@ -59,7 +59,7 @@ type DirectFetchStep = "generalFee" | "deliveryManagementFee";
 type PreviewItem = {
   rowIndex: number;
   type: "REGISTER" | "CLOSURE";
-  category: "신규" | "중복의심" | "날짜누락" | "확인필요" | "폐업양도이관";
+  category: "기존부과중" | "이번달부과대상" | "다음달부과대상" | "부과대상" | "중복의심" | "날짜누락" | "확인필요" | "폐업양도이관" | "미수금있음";
   sourceSystemId: string;
   vehicleNo: string;
   name: string;
@@ -134,7 +134,7 @@ const CATEGORY_CONFIG: Record<
   string,
   { label: string; style: string; icon: React.ElementType }
 > = {
-  신규: { label: "부과 대상자", style: "bg-sky-50 text-sky-700 border border-sky-200", icon: Users },
+  부과대상: { label: "부과 대상자", style: "bg-sky-50 text-sky-700 border border-sky-200", icon: Users },
   폐업양도이관: { label: "폐업/양도/이관", style: "bg-red-50 text-red-700 border border-red-200", icon: Building2 },
   중복의심: { label: "중복 의심", style: "bg-amber-50 text-amber-700 border border-amber-200", icon: AlertTriangle },
   날짜누락: { label: "날짜 누락", style: "bg-orange-50 text-orange-700 border border-orange-200", icon: CalendarX },
@@ -303,7 +303,7 @@ export default function MemberImport() {
   // summary counts
   const counts = preview
     ? {
-        신규: preview.filter((i) => i.category === "신규").length,
+        부과대상: preview.filter((i) => i.category === "부과대상").length,
         폐업양도이관: preview.filter((i) => i.category === "폐업양도이관").length,
         중복의심: preview.filter((i) => i.category === "중복의심").length,
         날짜누락: preview.filter((i) => i.category === "날짜누락").length,
@@ -505,7 +505,7 @@ export default function MemberImport() {
         <>
           {/* Summary cards */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            {(["신규", "폐업양도이관", "중복의심", "날짜누락", "확인필요"] as const).map((cat) => {
+            {(["부과대상", "폐업양도이관", "중복의심", "날짜누락", "확인필요"] as const).map((cat) => {
               const cfg = CATEGORY_CONFIG[cat];
               const Icon = cfg.icon;
               return (

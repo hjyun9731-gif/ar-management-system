@@ -93,6 +93,24 @@ function isCurrentOrNextBillingTarget(value?: string | null): boolean {
   return monthKey === getCurrentMonthKey() || monthKey === getNextMonthKey();
 }
 
+
+function getBillingTargetCategoryV33(value?: string | null, status?: string | null): "기존부과중" | "이번달부과대상" | "다음달부과대상" | "확인필요" {
+  if (status === "확인필요") return "확인필요";
+  const key = getMonthKey(value);
+  if (!key) return "기존부과중";
+  if (key === getCurrentMonthKey()) return "이번달부과대상";
+  if (key === getNextMonthKey()) return "다음달부과대상";
+  return "기존부과중";
+}
+
+function getBillingStatusV33(value?: string | null, status?: string | null): string {
+  if (status === "확인필요") return "확인필요";
+  const category = getBillingTargetCategoryV33(value, status);
+  if (category === "이번달부과대상") return "부과예정";
+  if (category === "다음달부과대상") return "대기";
+  return "기존부과중";
+}
+
 function determinePreviewStatus(billingStartDate?: string): "대기" | "부과예정" {
   const monthKey = getMonthKey(billingStartDate);
   if (!monthKey) return "대기";
@@ -299,7 +317,7 @@ type ImportRow = z.infer<typeof importRowSchema>;
 interface PreviewRegisterItem {
   rowIndex: number;
   type: "REGISTER";
-  category: "신규" | "중복의심" | "날짜누락" | "확인필요";
+  category: "기존부과중" | "이번달부과대상" | "다음달부과대상" | "부과대상" | "중복의심" | "날짜누락" | "확인필요" | "미수금있음";
   sourceSystemId: string;
   vehicleNo: string;
   name: string;
@@ -353,7 +371,7 @@ function makeRegisterPreviewItem(params: {
   } else if (params.status === "확인필요") {
     category = params.reason?.includes("인가일자") ? "확인필요" : "날짜누락";
   } else {
-    category = "신규";
+    category = getBillingTargetCategoryV33(params.billingStartMonth, params.status) as PreviewRegisterItem["category"];
   }
 
   return {
@@ -456,7 +474,7 @@ function buildRegisterPreviewItems(
     billingType: "협회비",
     billingStartMonth: billingStartDate,
     status: determinePreviewStatus(billingStartDate),
-    // 기존 회원 부과대상 추출이므로 신규 판단이 아니라 실제 기준일을 남긴다.
+    // 기존 회원 부과대상 추출이므로 부과대상 판단이 아니라 실제 기준일을 남긴다.
     // 가입일자 파싱 가능 -> 가입일자 기준, 가입일자 O/공란 등 오래된 가입자 -> 인가일자 기준, 둘 다 없으면 부과시작일 없이 협회비 대상.
     billingSource: basis === "인가일자" ? "인가일자" : "가입일자",
     reason: basis === "가입일자"
@@ -506,7 +524,7 @@ async function buildPreview(rows: ImportRow[], mode: ImportMode = "generalFee"):
         matchedCandidateId: matched?.id,
         reason: !hasValidProcessDate
           ? "처리일자 누락 또는 형식 오류"
-          : matched ? undefined : "부과 대상자 미등록 (신규 등록 필요)",
+          : matched ? undefined : "부과 대상자 미등록 (부과대상 등록 필요)",
         raw: row,
       });
     }
@@ -810,7 +828,7 @@ function mergeMembers(...groups: any[][]): any[] {
 }
 
 export const billingRouter = router({
-  // 신규 등록 연동 API
+  // 부과대상 등록 연동 API
   syncMembers: publicProcedure
     .input(
       z.object({
@@ -1072,7 +1090,7 @@ export const billingRouter = router({
       z.object({
         id: z.number(),
         billingStartMonth: z.string().optional(),
-        status: z.enum(["대기", "부과예정", "부과반영완료", "확인필요", "보류", "제외"]).optional(),
+        status: z.enum(["대기", "부과예정", "부과반영완료", "확인필요", "보류", "제외", "기존부과중", "반영완료"]).optional(),
         memo: z.string().optional(),
       })
     )
