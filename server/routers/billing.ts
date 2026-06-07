@@ -1,3 +1,4 @@
+import pg from "pg";
 import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import {
@@ -866,6 +867,264 @@ function numV57(value: any): number {
 }
 /* v57 payment history memory store end */
 
+
+/* v61 payment history DB persistence */
+const { Pool: PgPoolV61 } = pg as any;
+let paymentHistoryPoolV61: any = null;
+
+function getPaymentHistoryPoolV61() {
+  if (!process.env.DATABASE_URL) {
+    throw new Error("DATABASE_URL이 없습니다. Railway Postgres 연결을 확인하세요.");
+  }
+
+  if (!paymentHistoryPoolV61) {
+    paymentHistoryPoolV61 = new PgPoolV61({
+      connectionString: process.env.DATABASE_URL,
+      ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : undefined,
+    });
+  }
+
+  return paymentHistoryPoolV61;
+}
+
+function normalizeVehicleV61(value: any): string {
+  const text = String(value || "").replace(/\s+/g, "").trim();
+  if (!text) return "";
+  return text.endsWith("호") ? text : text + "호";
+}
+
+function numV61(value: any): number {
+  if (typeof value === "number" && Number.isFinite(value)) return Math.round(value);
+  const n = Number(String(value ?? "").replace(/,/g, "").replace(/원/g, ""));
+  return Number.isFinite(n) ? Math.round(n) : 0;
+}
+
+async function ensurePaymentHistoryTablesV61() {
+  const pool = getPaymentHistoryPoolV61();
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS payment_history_imports (
+      id BIGSERIAL PRIMARY KEY,
+      file_name TEXT,
+      row_count INTEGER DEFAULT 0,
+      inserted_count INTEGER DEFAULT 0,
+      updated_count INTEGER DEFAULT 0,
+      skipped_count INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS payment_history_rows (
+      id BIGSERIAL PRIMARY KEY,
+      source_file TEXT,
+      source_sheet TEXT,
+      source_row INTEGER DEFAULT 0,
+      region TEXT,
+      account TEXT,
+      vehicle_no TEXT NOT NULL,
+      vehicle_no_norm TEXT NOT NULL,
+      name TEXT NOT NULL,
+      billing_month TEXT NOT NULL,
+      billing_type TEXT NOT NULL,
+      expected_amount INTEGER DEFAULT 0,
+      balance_decrease_amount INTEGER DEFAULT 0,
+      current_balance_amount INTEGER DEFAULT 0,
+      memo TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(vehicle_no_norm, name, billing_month, billing_type)
+    )
+  `);
+
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_history_vehicle ON payment_history_rows(vehicle_no_norm)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_history_name ON payment_history_rows(name)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_history_month ON payment_history_rows(billing_month)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_history_type ON payment_history_rows(billing_type)`);
+}
+
+async function insertPaymentHistoryRowsV61(input: any) {
+  await ensurePaymentHistoryTablesV61();
+
+  const pool = getPaymentHistoryPoolV61();
+  const client = await pool.connect();
+
+  let insertedCount = 0;
+  let updatedCount = 0;
+  let skippedCount = 0;
+
+  try {
+    await client.query("BEGIN");
+
+    const importResult = await client.query(
+      `INSERT INTO payment_history_imports (file_name, row_count)
+       VALUES ($1, $2)
+       RETURNING id`,
+      [input.fileName || "과거 미수금 자료", input.rows.length]
+    );
+
+    for (const row of input.rows) {
+      const vehicleNo = String(row.vehicleNo || "").trim();
+      const vehicleNorm = normalizeVehicleV61(vehicleNo);
+      const name = String(row.name || "").trim();
+      const billingMonth = String(row.billingMonth || "").trim();
+      const billingType = String(row.billingType || "").trim() || "미분류";
+
+      if (!vehicleNorm || !name || !billingMonth) {
+        skippedCount++;
+        continue;
+      }
+
+      const result = await client.query(
+        `INSERT INTO payment_history_rows (
+            source_file, source_sheet, source_row, region, account,
+            vehicle_no, vehicle_no_norm, name, billing_month, billing_type,
+            expected_amount, balance_decrease_amount, current_balance_amount, memo, updated_at
+          )
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW())
+          ON CONFLICT (vehicle_no_norm, name, billing_month, billing_type)
+          DO UPDATE SET
+            source_file = EXCLUDED.source_file,
+            source_sheet = EXCLUDED.source_sheet,
+            source_row = EXCLUDED.source_row,
+            region = EXCLUDED.region,
+            account = EXCLUDED.account,
+            vehicle_no = EXCLUDED.vehicle_no,
+            expected_amount = EXCLUDED.expected_amount,
+            balance_decrease_amount = EXCLUDED.balance_decrease_amount,
+            current_balance_amount = EXCLUDED.current_balance_amount,
+            memo = EXCLUDED.memo,
+            updated_at = NOW()
+          RETURNING (xmax = 0) AS inserted`,
+        [
+          row.sourceFile || input.fileName || "",
+          row.sourceSheet || "",
+          Number(row.sourceRow || 0),
+          row.region || "",
+          row.account || "",
+          vehicleNo,
+          vehicleNorm,
+          name,
+          billingMonth,
+          billingType,
+          numV61(row.expectedAmount),
+          numV61(row.paidAmount),
+          numV61(row.unpaidAmount),
+          row.memo || "잔액변화 기반 추정자료",
+        ]
+      );
+
+      if (result.rows?.[0]?.inserted) insertedCount++;
+      else updatedCount++;
+    }
+
+    await client.query(
+      `UPDATE payment_history_imports
+       SET inserted_count=$1, updated_count=$2, skipped_count=$3
+       WHERE id=$4`,
+      [insertedCount, updatedCount, skippedCount, importResult.rows[0].id]
+    );
+
+    await client.query("COMMIT");
+
+    return {
+      ok: true,
+      importId: importResult.rows[0].id,
+      insertedCount,
+      updatedCount,
+      skippedCount,
+      matchedCount: insertedCount + updatedCount,
+      unmatchedCount: skippedCount,
+      totalStored: insertedCount + updatedCount,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function getPaymentHistorySummaryV61() {
+  await ensurePaymentHistoryTablesV61();
+
+  const pool = getPaymentHistoryPoolV61();
+  const result = await pool.query(`
+    WITH latest AS (
+      SELECT DISTINCT ON (vehicle_no_norm, name, billing_type)
+        vehicle_no_norm,
+        vehicle_no,
+        name,
+        region,
+        account,
+        billing_type,
+        billing_month AS latest_month,
+        current_balance_amount AS latest_balance
+      FROM payment_history_rows
+      ORDER BY vehicle_no_norm, name, billing_type, billing_month DESC
+    ),
+    grouped AS (
+      SELECT
+        vehicle_no_norm,
+        name,
+        billing_type,
+        MIN(billing_month) AS billing_start_month,
+        COUNT(*)::int AS history_count,
+        SUM(CASE WHEN current_balance_amount > 0 THEN 1 ELSE 0 END)::int AS balance_months,
+        MAX(CASE WHEN balance_decrease_amount > 0 THEN billing_month ELSE NULL END) AS last_decrease_month
+      FROM payment_history_rows
+      GROUP BY vehicle_no_norm, name, billing_type
+    )
+    SELECT
+      latest.vehicle_no_norm || '|' || latest.name || '|' || latest.billing_type AS "candidateId",
+      latest.vehicle_no AS "vehicleNo",
+      latest.name AS "name",
+      latest.region AS "region",
+      latest.account AS "account",
+      latest.billing_type AS "billingType",
+      grouped.billing_start_month AS "billingStartMonth",
+      grouped.history_count AS "historyCount",
+      grouped.balance_months AS "unpaidMonths",
+      latest.latest_balance AS "totalUnpaid",
+      latest.latest_month AS "latestMonth",
+      grouped.last_decrease_month AS "lastPaidMonth"
+    FROM latest
+    JOIN grouped
+      ON grouped.vehicle_no_norm = latest.vehicle_no_norm
+     AND grouped.name = latest.name
+     AND grouped.billing_type = latest.billing_type
+    ORDER BY latest.latest_balance DESC, latest.vehicle_no ASC
+  `);
+
+  return result.rows;
+}
+
+async function getPaymentHistoryStatsV61() {
+  await ensurePaymentHistoryTablesV61();
+
+  const pool = getPaymentHistoryPoolV61();
+  const result = await pool.query(`
+    WITH latest AS (
+      SELECT DISTINCT ON (vehicle_no_norm, name, billing_type)
+        vehicle_no_norm, name, billing_type, current_balance_amount
+      FROM payment_history_rows
+      ORDER BY vehicle_no_norm, name, billing_type, billing_month DESC
+    )
+    SELECT
+      COUNT(*)::int AS "trackedMembers",
+      COALESCE(SUM(current_balance_amount), 0)::int AS "currentBalanceTotal",
+      SUM(CASE WHEN current_balance_amount > 0 THEN 1 ELSE 0 END)::int AS "membersWithBalance"
+    FROM latest
+  `);
+
+  return result.rows[0] || {
+    trackedMembers: 0,
+    currentBalanceTotal: 0,
+    membersWithBalance: 0,
+  };
+}
+/* v61 payment history DB persistence end */
+
 export const billingRouter = router({
   // 부과대상 등록 연동 API
   syncMembers: publicProcedure
@@ -1527,6 +1786,7 @@ export const billingRouter = router({
       const { runManualBillingBatch } = await import("../scheduler/billingBatch");
       return await runManualBillingBatch(input.month);
     }),
+
   paymentHistoryImportRows: publicProcedure
     .input(z.object({
       fileName: z.string().optional(),
@@ -1547,85 +1807,17 @@ export const billingRouter = router({
       })).max(1000),
     }))
     .mutation(async ({ input }) => {
-      let insertedCount = 0;
-      let matchedCount = 0;
-      let unmatchedCount = 0;
-
-      for (const row of input.rows) {
-        if (!row.vehicleNo || !row.name || !row.billingMonth) {
-          unmatchedCount++;
-          continue;
-        }
-
-        paymentHistoryRowsV57.push({
-          id: paymentHistorySeqV57++,
-          sourceFile: row.sourceFile || input.fileName || "",
-          sourceSheet: row.sourceSheet || "",
-          sourceRow: row.sourceRow || 0,
-          region: row.region || "",
-          account: row.account || "",
-          vehicleNo: row.vehicleNo,
-          name: row.name,
-          billingMonth: row.billingMonth,
-          billingType: row.billingType || "",
-          expectedAmount: numV57(row.expectedAmount),
-          paidAmount: numV57(row.paidAmount),
-          unpaidAmount: numV57(row.unpaidAmount),
-          memo: row.memo || "",
-        });
-        insertedCount++;
-        matchedCount++;
-      }
-
-      return {
-        ok: true,
-        insertedCount,
-        matchedCount,
-        unmatchedCount,
-        totalStored: paymentHistoryRowsV57.length,
-      };
+      return await insertPaymentHistoryRowsV61(input);
     }),
 
   paymentHistorySummary: publicProcedure
     .query(async () => {
-      const map = new Map<string, any>();
+      return await getPaymentHistorySummaryV61();
+    }),
 
-      for (const row of paymentHistoryRowsV57) {
-        const key = normalizeVehicleV57(row.vehicleNo) + "|" + row.name + "|" + (row.billingType || "");
-        const prev = map.get(key) || {
-          candidateId: key,
-          vehicleNo: row.vehicleNo,
-          name: row.name,
-          region: row.region || "",
-          memberType: "",
-          billingType: row.billingType || "",
-          billingStartMonth: row.billingMonth,
-          historyCount: 0,
-          paidMonths: 0,
-          unpaidMonths: 0,
-          totalUnpaid: 0,
-          lastPaidMonth: "",
-          latestMonth: "",
-        };
-
-        prev.historyCount += 1;
-        if (!prev.latestMonth || row.billingMonth >= prev.latestMonth) {
-          prev.latestMonth = row.billingMonth;
-          prev.totalUnpaid = numV57(row.unpaidAmount);
-        }
-        if (numV57(row.unpaidAmount) > 0) prev.unpaidMonths += 1;
-        if (numV57(row.paidAmount) > 0) {
-          prev.paidMonths += 1;
-          if (!prev.lastPaidMonth || row.billingMonth > prev.lastPaidMonth) {
-            prev.lastPaidMonth = row.billingMonth;
-          }
-        }
-        if (row.billingMonth < prev.billingStartMonth) prev.billingStartMonth = row.billingMonth;
-
-        map.set(key, prev);
-      }
-
-      return Array.from(map.values()).sort((a, b) => Number(b.totalUnpaid || 0) - Number(a.totalUnpaid || 0));
+  paymentHistoryStats: publicProcedure
+    .query(async () => {
+      return await getPaymentHistoryStatsV61();
     }),
 
 });
