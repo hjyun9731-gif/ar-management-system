@@ -96,7 +96,7 @@ export function BillingPreviewModal({ open, onOpenChange, month }: BillingPrevie
               </div>
               <div className="border-t pt-2 flex justify-between text-sm font-bold">
                 <span>합계</span>
-                <span>{getBillingPreviewUnitAmountLabelSafeV46(getBillingPreviewItemsSafeV46()) : (typeof previewItems !== 'undefined' ? previewItems : (typeof candidates !== 'undefined' ? candidates : [])))}원</span>
+                <span>{getBillingPreviewUnitAmountLabelV47(getBillingPreviewItemsV47()) : (typeof previewItems !== 'undefined' ? previewItems : (typeof candidates !== 'undefined' ? candidates : [])))}원</span>
               </div>
             </CardContent>
           </Card>
@@ -180,18 +180,28 @@ export function BillingPreviewModal({ open, onOpenChange, month }: BillingPrevie
 
 
 
-/* v46 safe helper: 부과항목별 단가 표시 */
-function getBillingPreviewUnitAmountLabelSafeV46(items: any[] = []): string {
+
+
+
+/* v47 safe helper: 부과 미리보기 항목별 단가 */
+function getBillingPreviewAmountByTypeV47(itemOrType: any): number {
+  const raw = typeof itemOrType === "string"
+    ? itemOrType
+    : String(itemOrType?.billingType || itemOrType?.billing_type || itemOrType?.billingItem || itemOrType?.billing_item || itemOrType?.부과항목 || "");
+  if (raw.includes("관리")) return 5000;
+  if (raw.includes("협회")) return 10000;
+  return 0;
+}
+
+function getBillingPreviewUnitAmountLabelV47(items: any[] = []): string {
   const list = Array.isArray(items) ? items : [];
-  const hasAssociation = list.some((item) => String(item?.billingType || item?.billing_type || item?.billingItem || item?.billing_item || item?.부과항목 || "").includes("협회"));
-  const hasManagement = list.some((item) => String(item?.billingType || item?.billing_type || item?.billingItem || item?.billing_item || item?.부과항목 || "").includes("관리"));
-  if (hasAssociation && hasManagement) return "협회비 10,000 / 관리비 5,000";
-  if (hasAssociation) return "10,000";
-  if (hasManagement) return "5,000";
+  const amounts = Array.from(new Set(list.map(getBillingPreviewAmountByTypeV47).filter(Boolean)));
+  if (amounts.length === 1) return amounts[0].toLocaleString("ko-KR");
+  if (amounts.length > 1) return "협회비 10,000 / 관리비 5,000";
   return "항목별";
 }
 
-function getBillingPreviewItemsSafeV46(): any[] {
+function getBillingPreviewItemsV47(): any[] {
   try {
     if (typeof previewItems !== "undefined" && Array.isArray(previewItems)) return previewItems;
   } catch {}
@@ -216,4 +226,4 @@ function getBillingPreviewItemsSafeV46(): any[] {
   } catch {}
   return [];
 }
-/* v46 safe helper end */
+/* v47 safe helper end */
