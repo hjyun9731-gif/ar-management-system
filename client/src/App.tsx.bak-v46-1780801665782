@@ -12,7 +12,6 @@ import ClosureEvents from "./pages/ClosureEvents";
 import BillingRecords from "./pages/BillingRecords";
 import SyncLogs from "./pages/SyncLogs";
 import MemberImport from "./pages/MemberImport";
-import PaymentHistory from "./pages/PaymentHistory";
 
 function Router() {
   return (
@@ -28,8 +27,7 @@ function Router() {
               <Route path="/billing-records" component={BillingRecords} />
               <Route path="/sync-logs" component={SyncLogs} />
               <Route path="/import" component={MemberImport} />
-              <Route path="/payment-history" component={PaymentHistory} />
-          <Route component={NotFound} />
+              <Route component={NotFound} />
             </Switch>
           </DashboardLayout>
         )}

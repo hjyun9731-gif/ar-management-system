@@ -96,7 +96,7 @@ export function BillingPreviewModal({ open, onOpenChange, month }: BillingPrevie
               </div>
               <div className="border-t pt-2 flex justify-between text-sm font-bold">
                 <span>합계</span>
-                <span>{getBillingPreviewUnitAmountLabelSafeV46(getBillingPreviewItemsSafeV46()) : (typeof previewItems !== 'undefined' ? previewItems : (typeof candidates !== 'undefined' ? candidates : [])))}원</span>
+                <span>{getBillingPreviewUnitAmountLabelV43(getBillingPreviewItemsV43()) : (typeof previewItems !== 'undefined' ? previewItems : (typeof candidates !== 'undefined' ? candidates : [])))}원</span>
               </div>
             </CardContent>
           </Card>
@@ -171,27 +171,51 @@ export function BillingPreviewModal({ open, onOpenChange, month }: BillingPrevie
 }
 
 
+/* v39 helper: 부과항목별 금액 계산 */
+function getBillingAmountByTypeV40(itemOrType: any): number {
+  const raw = typeof itemOrType === "string"
+    ? itemOrType
+    : String(itemOrType?.billingType || itemOrType?.billing_type || itemOrType?.feeType || itemOrType?.chargeType || itemOrType?.billing_type_name || itemOrType?.billingItem || itemOrType?.billing_item || itemOrType?.부과항목 || "");
+  if (raw.includes("관리")) return 5000;
+  if (raw.includes("협회")) return 10000;
+
+  // 회원구분만 있는 경우 보조 판단: 택배회원은 관리비 가능성이 높지만,
+  // 실제 billingType이 없으면 안전하게 0원 처리해서 잘못 과대계산하지 않음.
+  return 0;
+}
+
+function getBillingTotalAmountV40(items: any[]): number {
+  return (items || []).reduce((sum, item) => sum + getBillingAmountByTypeV40(item), 0);
+}
+
+function getBillingPreviewUnitAmountLabelV43(getBillingPreviewItemsV43()): string {
+  const amounts = Array.from(new Set((items || []).map(getBillingAmountByTypeV40).filter(Boolean)));
+  if (amounts.length === 1) return amounts[0].toLocaleString("ko-KR");
+  if (amounts.length > 1) return "항목별";
+  return "0";
+}
+/* v39 helper end */
 
 
+/* v40 helper: 안전한 부과항목별 금액 계산 */
 
 
+/* v40 helper end */
 
 
-
-
-
-/* v46 safe helper: 부과항목별 단가 표시 */
-function getBillingPreviewUnitAmountLabelSafeV46(items: any[] = []): string {
+/* v43 helper: 부과 미리보기 항목별 단가 표시 */
+function getBillingPreviewUnitAmountLabelV43(items: any[]): string {
   const list = Array.isArray(items) ? items : [];
   const hasAssociation = list.some((item) => String(item?.billingType || item?.billing_type || item?.billingItem || item?.billing_item || item?.부과항목 || "").includes("협회"));
   const hasManagement = list.some((item) => String(item?.billingType || item?.billing_type || item?.billingItem || item?.billing_item || item?.부과항목 || "").includes("관리"));
+
   if (hasAssociation && hasManagement) return "협회비 10,000 / 관리비 5,000";
   if (hasAssociation) return "10,000";
   if (hasManagement) return "5,000";
   return "항목별";
 }
 
-function getBillingPreviewItemsSafeV46(): any[] {
+function getBillingPreviewItemsV43(): any[] {
   try {
     if (typeof previewItems !== "undefined" && Array.isArray(previewItems)) return previewItems;
   } catch {}
@@ -199,21 +223,21 @@ function getBillingPreviewItemsSafeV46(): any[] {
     if (typeof candidates !== "undefined" && Array.isArray(candidates)) return candidates;
   } catch {}
   try {
-    if (typeof billingPreview !== "undefined") {
-      const v: any = billingPreview;
-      if (Array.isArray(v?.items)) return v.items;
-      if (Array.isArray(v?.candidates)) return v.candidates;
-      if (Array.isArray(v?.targets)) return v.targets;
+    if (typeof previewData !== "undefined") {
+      const anyPreviewData: any = previewData;
+      if (Array.isArray(anyPreviewData?.items)) return anyPreviewData.items;
+      if (Array.isArray(anyPreviewData?.candidates)) return anyPreviewData.candidates;
+      if (Array.isArray(anyPreviewData?.targets)) return anyPreviewData.targets;
     }
   } catch {}
   try {
-    if (typeof previewData !== "undefined") {
-      const v: any = previewData;
-      if (Array.isArray(v?.items)) return v.items;
-      if (Array.isArray(v?.candidates)) return v.candidates;
-      if (Array.isArray(v?.targets)) return v.targets;
+    if (typeof billingPreview !== "undefined") {
+      const anyBillingPreview: any = billingPreview;
+      if (Array.isArray(anyBillingPreview?.items)) return anyBillingPreview.items;
+      if (Array.isArray(anyBillingPreview?.candidates)) return anyBillingPreview.candidates;
+      if (Array.isArray(anyBillingPreview?.targets)) return anyBillingPreview.targets;
     }
   } catch {}
   return [];
 }
-/* v46 safe helper end */
+/* v43 helper end */
