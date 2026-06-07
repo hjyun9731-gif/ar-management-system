@@ -176,7 +176,7 @@ export default function Dashboard() {
               )}
               {stats.unpaidCount > 0 && (
                 <span className="text-xs text-amber-700">
-                  미수금 <strong>{0}건</strong>
+                  미수금 <strong>{stats.unpaidCount}건</strong>
                 </span>
               )}
               {stats.confirmNeededCount > 0 && (

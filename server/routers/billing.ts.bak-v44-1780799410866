@@ -145,7 +145,7 @@ function __billingImportNextMonthKey(): string {
 function __billingImportCategory(item: any): string {
   if (!item || item.status === '확인필요' || item.billingType === '확인필요') return '확인필요';
   if (item.category === '중복 의심' || item.category === '중복의심') return '중복의심';
-  
+  if (item.hasArrears || item.hasUnpaid || item.arrearsAmount > 0 || item.unpaidAmount > 0) return '미수금있음';
   const key = __billingImportMonthKey(item.billingStartMonth || item.billingStartDate || item.startDate);
   if (!key) return '기존부과중';
   if (key === __billingImportCurrentMonthKey()) return '이번달부과대상';
