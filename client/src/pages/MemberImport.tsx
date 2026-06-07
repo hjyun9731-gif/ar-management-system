@@ -134,12 +134,33 @@ const CATEGORY_CONFIG: Record<
   string,
   { label: string; style: string; icon: React.ElementType }
 > = {
+  기존부과중: { label: "기존부과중", style: "bg-slate-50 text-slate-700 border border-slate-200", icon: CheckCircle2 },
+  이번달부과대상: { label: "이번달부과대상", style: "bg-sky-50 text-sky-700 border border-sky-200", icon: Users },
+  다음달부과대상: { label: "다음달부과대상", style: "bg-indigo-50 text-indigo-700 border border-indigo-200", icon: Users },
+  부과대상: { label: "부과대상", style: "bg-emerald-50 text-emerald-700 border border-emerald-200", icon: Users },
+  미수금있음: { label: "미수금있음", style: "bg-purple-50 text-purple-700 border border-purple-200", icon: AlertTriangle },
   부과대상: { label: "부과 대상자", style: "bg-sky-50 text-sky-700 border border-sky-200", icon: Users },
   폐업양도이관: { label: "폐업/양도/이관", style: "bg-red-50 text-red-700 border border-red-200", icon: Building2 },
   중복의심: { label: "중복 의심", style: "bg-amber-50 text-amber-700 border border-amber-200", icon: AlertTriangle },
   날짜누락: { label: "날짜 누락", style: "bg-orange-50 text-orange-700 border border-orange-200", icon: CalendarX },
   확인필요: { label: "확인 필요", style: "bg-violet-50 text-violet-700 border border-violet-200", icon: HelpCircle },
 };
+
+
+function getCategoryConfigV34(category: string | undefined | null) {
+  const key = String(category || "부과대상");
+  return (
+    CATEGORY_CONFIG[key] ||
+    CATEGORY_CONFIG["부과대상"] ||
+    CATEGORY_CONFIG["기존부과중"] ||
+    {
+      label: key,
+      style: "bg-slate-50 text-slate-700 border border-slate-200",
+      icon: CheckCircle2,
+    }
+  );
+}
+
 
 const SAMPLE_CSV = `type,sourceSystemId,vehicleNo,name,memberType,joinDate,approvalDate,certificateDate,managementNo,region,closureType,processDate
 REGISTER,MEM-001,12가3456,홍길동,개인회원,2026-05-15,,,MGT-001,강원,,
@@ -567,7 +588,7 @@ export default function MemberImport() {
                   </TableHeader>
                   <TableBody>
                     {preview.map((item) => {
-                      const cfg = CATEGORY_CONFIG[item.category];
+                      const cfg = getCategoryConfigV34(item.category);
                       const Icon = cfg.icon;
                       const isSelected = selectedIndexes.has(item.rowIndex);
                       return (
