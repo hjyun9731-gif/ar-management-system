@@ -834,6 +834,38 @@ function normalizeCandidateStatusFilterV38(value: any): string | undefined {
   return v;
 }
 
+
+/* v57 payment history memory store */
+type PaymentHistoryRowV57 = {
+  id: number;
+  sourceFile?: string;
+  sourceSheet?: string;
+  sourceRow?: number;
+  region?: string;
+  account?: string;
+  vehicleNo: string;
+  name: string;
+  billingMonth: string;
+  billingType?: string;
+  expectedAmount?: number;
+  paidAmount?: number;
+  unpaidAmount?: number;
+  memo?: string;
+};
+
+const paymentHistoryRowsV57: PaymentHistoryRowV57[] = [];
+let paymentHistorySeqV57 = 1;
+
+function normalizeVehicleV57(value: any): string {
+  return String(value || "").replace(/\s+/g, "").replace(/호$/g, "") + (String(value || "").trim() ? "호" : "");
+}
+
+function numV57(value: any): number {
+  const n = Number(String(value ?? "").replace(/,/g, "").replace(/원/g, ""));
+  return Number.isFinite(n) ? Math.round(n) : 0;
+}
+/* v57 payment history memory store end */
+
 export const billingRouter = router({
   // 부과대상 등록 연동 API
   syncMembers: publicProcedure
@@ -1495,6 +1527,103 @@ export const billingRouter = router({
       const { runManualBillingBatch } = await import("../scheduler/billingBatch");
       return await runManualBillingBatch(input.month);
     }),
+  paymentHistoryImportRows: publicProcedure
+    .input(z.object({
+      fileName: z.string().optional(),
+      rows: z.array(z.object({
+        sourceFile: z.string().optional(),
+        sourceSheet: z.string().optional(),
+        sourceRow: z.number().optional(),
+        region: z.string().optional(),
+        account: z.string().optional(),
+        vehicleNo: z.string(),
+        name: z.string(),
+        billingMonth: z.string(),
+        billingType: z.string().optional(),
+        expectedAmount: z.number().optional(),
+        paidAmount: z.number().optional(),
+        unpaidAmount: z.number().optional(),
+        memo: z.string().optional(),
+      })).max(1000),
+    }))
+    .mutation(async ({ input }) => {
+      let insertedCount = 0;
+      let matchedCount = 0;
+      let unmatchedCount = 0;
+
+      for (const row of input.rows) {
+        if (!row.vehicleNo || !row.name || !row.billingMonth) {
+          unmatchedCount++;
+          continue;
+        }
+
+        paymentHistoryRowsV57.push({
+          id: paymentHistorySeqV57++,
+          sourceFile: row.sourceFile || input.fileName || "",
+          sourceSheet: row.sourceSheet || "",
+          sourceRow: row.sourceRow || 0,
+          region: row.region || "",
+          account: row.account || "",
+          vehicleNo: row.vehicleNo,
+          name: row.name,
+          billingMonth: row.billingMonth,
+          billingType: row.billingType || "",
+          expectedAmount: numV57(row.expectedAmount),
+          paidAmount: numV57(row.paidAmount),
+          unpaidAmount: numV57(row.unpaidAmount),
+          memo: row.memo || "",
+        });
+        insertedCount++;
+        matchedCount++;
+      }
+
+      return {
+        ok: true,
+        insertedCount,
+        matchedCount,
+        unmatchedCount,
+        totalStored: paymentHistoryRowsV57.length,
+      };
+    }),
+
+  paymentHistorySummary: publicProcedure
+    .query(async () => {
+      const map = new Map<string, any>();
+
+      for (const row of paymentHistoryRowsV57) {
+        const key = normalizeVehicleV57(row.vehicleNo) + "|" + row.name + "|" + (row.billingType || "");
+        const prev = map.get(key) || {
+          candidateId: key,
+          vehicleNo: row.vehicleNo,
+          name: row.name,
+          region: row.region || "",
+          memberType: "",
+          billingType: row.billingType || "",
+          billingStartMonth: row.billingMonth,
+          historyCount: 0,
+          paidMonths: 0,
+          unpaidMonths: 0,
+          totalUnpaid: 0,
+          lastPaidMonth: "",
+        };
+
+        prev.historyCount += 1;
+        prev.totalUnpaid += numV57(row.unpaidAmount);
+        if (numV57(row.unpaidAmount) > 0) prev.unpaidMonths += 1;
+        if (numV57(row.paidAmount) > 0) {
+          prev.paidMonths += 1;
+          if (!prev.lastPaidMonth || row.billingMonth > prev.lastPaidMonth) {
+            prev.lastPaidMonth = row.billingMonth;
+          }
+        }
+        if (row.billingMonth < prev.billingStartMonth) prev.billingStartMonth = row.billingMonth;
+
+        map.set(key, prev);
+      }
+
+      return Array.from(map.values()).sort((a, b) => Number(b.totalUnpaid || 0) - Number(a.totalUnpaid || 0));
+    }),
+
 });
 
 
