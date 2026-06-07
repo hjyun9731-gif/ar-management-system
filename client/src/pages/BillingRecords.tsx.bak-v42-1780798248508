@@ -243,7 +243,7 @@ function getBillingTotalAmountV40(items: any[]): number {
 }
 
 function getBillingAmountLabelV40(items: any[]): string {
-  const amounts = Array.from(new Set((items || []).map(getBillingAmountByTypeV40).filter(Boolean)));
+  const amounts = Array.from(new Set((items || []).map(getBillingAmountByTypeV39).filter(Boolean)));
   if (amounts.length === 1) return amounts[0].toLocaleString("ko-KR");
   if (amounts.length > 1) return "항목별";
   return "0";
