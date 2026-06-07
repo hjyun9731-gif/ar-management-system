@@ -63,7 +63,7 @@ export default function BillingCandidates() {
   const { data: candidates = [], isLoading } = trpc.billing.listCandidates.useQuery({
     region: filters.region === "all" ? undefined : filters.region,
     memberType: filters.memberType === "all" ? undefined : filters.memberType,
-    status: filters.status === "all" ? undefined : filters.status,
+    status: filters.status === 'all' || filters.status === '전체' ? undefined : filters.status === "all" ? undefined : filters.status,
     billingStartMonth: filters.billingStartMonth || undefined,
   });
 

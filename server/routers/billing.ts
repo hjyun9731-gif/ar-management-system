@@ -827,6 +827,13 @@ function mergeMembers(...groups: any[][]): any[] {
   return Array.from(map.values());
 }
 
+
+function normalizeCandidateStatusFilterV38(value: any): string | undefined {
+  const v = String(value ?? "").trim();
+  if (!v || v === "전체" || v.toLowerCase() === "all" || v === "__ALL__") return undefined;
+  return v;
+}
+
 export const billingRouter = router({
   // 부과대상 등록 연동 API
   syncMembers: publicProcedure
@@ -1066,13 +1073,11 @@ export const billingRouter = router({
       const candidates = await getBillingCandidates({
         region: input.region,
         memberType: input.memberType,
-        status: input.status,
+        status: normalizeCandidateStatusFilterV38(input.status),
         billingStartMonth: input.billingStartMonth,
       });
       if (!input.status) {
-        return candidates.filter((candidate: any) =>
-          candidate.status !== "기존부과중" && candidate.status !== "반영완료"
-        );
+        return candidates;
       }
       return candidates;
     }),
@@ -1097,7 +1102,7 @@ export const billingRouter = router({
     .mutation(async ({ input }) => {
       await updateBillingCandidate(input.id, {
         billingStartMonth: input.billingStartMonth,
-        status: input.status,
+        status: normalizeCandidateStatusFilterV38(input.status),
         memo: input.memo,
       });
       return { success: true };
@@ -1130,7 +1135,7 @@ export const billingRouter = router({
     .query(async ({ input }) => {
       const logs = await getSyncLogs({
         eventType: input.eventType,
-        status: input.status,
+        status: normalizeCandidateStatusFilterV38(input.status),
       });
       return await logs;
     }),
@@ -1401,7 +1406,7 @@ export const billingRouter = router({
                 eventType: "IMPORT",
                 sourceId: item.sourceSystemId,
                 targetId: String(candidateId),
-                status: status === "확인필요" ? "WARNING" : "SUCCESS",
+                status: normalizeCandidateStatusFilterV38(status) === "확인필요" ? "WARNING" : "SUCCESS",
                 message: status === "확인필요"
                   ? (item.reason || "필수 날짜 누락")
                   : (status === "기존부과중"
