@@ -96,7 +96,7 @@ export function BillingPreviewModal({ open, onOpenChange, month }: BillingPrevie
               </div>
               <div className="border-t pt-2 flex justify-between text-sm font-bold">
                 <span>합계</span>
-                <span>{getBillingPreviewUnitAmountLabelV47(getBillingPreviewItemsV47()) : (typeof previewItems !== 'undefined' ? previewItems : (typeof candidates !== 'undefined' ? candidates : [])))}원</span>
+                <span>{getBillingPreviewUnitAmountLabelV47(getBillingPreviewItemsV47())}원</span>
               </div>
             </CardContent>
           </Card>
