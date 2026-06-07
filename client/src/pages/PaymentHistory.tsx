@@ -135,8 +135,8 @@ function parsePreparedCsv(fileName: string, csvText: string): ParsedPaymentRow[]
   const regionIdx = idx(["지역", "region"]);
   const accountIdx = idx(["계정", "account"]);
   const typeIdx = idx(["부과항목", "billingType", "billing_type"]);
-  const expectedIdx = idx(["월부과액", "부과액", "expectedAmount", "expected_amount"]);
-  const paidIdx = idx(["추정납부액", "납부액", "입금액", "paidAmount", "paid_amount"]);
+  const expectedIdx = idx(["월부과액_기준", "월부과액", "부과액", "expectedAmount", "expected_amount"]);
+  const paidIdx = idx(["납부액_잔액변화추정", "추정납부액", "납부액", "입금액", "paidAmount", "paid_amount"]);
   const unpaidIdx = idx(["당월잔액", "미수금액", "미납액", "unpaidAmount", "unpaid_amount"]);
   const memoIdx = idx(["판정", "비고", "memo"]);
 
@@ -323,12 +323,27 @@ export default function PaymentHistory() {
       for (const file of Array.from(files)) {
         if (file.name.toLowerCase().endsWith(".zip")) {
           const zip = await JSZip.loadAsync(await file.arrayBuffer());
-          const entries = Object.values(zip.files).filter((entry) => !entry.dir && /\.(xlsx|xlsm|xls|csv)$/i.test(entry.name));
-          for (const entry of entries) {
-            if (/\.csv$/i.test(entry.name)) {
-              pushManyV55(allRows, parsePreparedCsv(entry.name, await entry.async("string")));
-            } else {
-              pushManyV55(allRows, await parseWorkbook(entry.name, await entry.async("arraybuffer")));
+          const allEntries = Object.values(zip.files).filter((entry) => !entry.dir);
+
+          const preparedCsv = allEntries.find((entry) =>
+            /프로그램업로드용.*잔액변화납부이력.*\.csv$/i.test(entry.name) ||
+            /잔액변화납부이력.*\.csv$/i.test(entry.name)
+          );
+
+          if (preparedCsv) {
+            pushManyV55(allRows, parsePreparedCsv(preparedCsv.name, await preparedCsv.async("string")));
+          } else {
+            const entries = allEntries.filter((entry) =>
+              /\.(xlsx|xlsm|xls|csv)$/i.test(entry.name) &&
+              !/요약|README|작업요약/i.test(entry.name)
+            );
+
+            for (const entry of entries) {
+              if (/\.csv$/i.test(entry.name)) {
+                pushManyV55(allRows, parsePreparedCsv(entry.name, await entry.async("string")));
+              } else {
+                pushManyV55(allRows, await parseWorkbook(entry.name, await entry.async("arraybuffer")));
+              }
             }
           }
         } else if (/\.csv$/i.test(file.name)) {
@@ -383,7 +398,7 @@ export default function PaymentHistory() {
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">납부이력 추적</h1>
-        <div className="text-xs text-emerald-600 font-semibold mt-1">v55 대용량 ZIP/CSV 안전 파서 화면</div>
+        <div className="text-xs text-emerald-600 font-semibold mt-1">v56 업로드용 CSV만 읽는 화면</div>
         <p className="text-sm text-slate-500 mt-1">
           현재 부과대상자 기준으로 과거 엑셀/ZIP/CSV 전체 파일과 전체 시트를 읽어 월별 납부·미수금 이력을 매칭합니다.
         </p>
