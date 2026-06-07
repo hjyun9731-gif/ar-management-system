@@ -878,9 +878,14 @@ function getPaymentHistoryPoolV61() {
   }
 
   if (!paymentHistoryPoolV61) {
+    const databaseUrl = process.env.DATABASE_URL || "";
+    const needsSsl =
+      databaseUrl.includes("sslmode=require") ||
+      process.env.PGSSLMODE === "require";
+
     paymentHistoryPoolV61 = new PgPoolV61({
-      connectionString: process.env.DATABASE_URL,
-      ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : undefined,
+      connectionString: databaseUrl,
+      ...(needsSsl ? { ssl: { rejectUnauthorized: false } } : {}),
     });
   }
 
