@@ -476,9 +476,9 @@ export default function PaymentHistory() {
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">납부이력 추적</h1>
-        <div className="text-xs text-emerald-600 font-semibold mt-1">v60 요약 중심 · 상세 클릭 화면</div>
+        <div className="text-xs text-emerald-600 font-semibold mt-1">v63 요청 컬럼 정리 화면</div>
         <p className="text-sm text-slate-500 mt-1">
-          현재 부과대상자 기준으로 과거 엑셀/ZIP/CSV를 읽어 사람별 요약을 먼저 보고, 차량번호를 클릭하면 월별 상세를 확인합니다.
+          현재 부과대상자 기준으로 과거 납부이력을 사람별 요약으로 조회합니다. 차량번호를 클릭하면 월별 상세를 확인합니다.
         </p>
       </div>
 
@@ -529,11 +529,10 @@ export default function PaymentHistory() {
                   <TableHead>지역</TableHead>
                   <TableHead>부과항목</TableHead>
                   <TableHead>부과시작월</TableHead>
-                  <TableHead className="text-right">이력월수</TableHead>
-                  <TableHead className="text-right">잔액발생월수</TableHead>
-                  <TableHead className="text-right">현재잔액(최신월)</TableHead>
-                  <TableHead>최신월</TableHead>
-                  <TableHead>마지막 잔액감소월</TableHead>
+                  <TableHead className="text-right">부과개월수</TableHead>
+                  <TableHead className="text-right">미납발생개월수</TableHead>
+                  <TableHead className="text-right">미수금</TableHead>
+                  <TableHead>최근납부일</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -547,13 +546,12 @@ export default function PaymentHistory() {
                     <TableCell className="text-right">{row.historyCount.toLocaleString()}</TableCell>
                     <TableCell className="text-right">{row.balanceMonths.toLocaleString()}</TableCell>
                     <TableCell className="text-right font-semibold text-red-600">{moneyLabel(row.latestBalance)}</TableCell>
-                    <TableCell>{row.latestMonth || "-"}</TableCell>
                     <TableCell>{row.lastDecreaseMonth || "-"}</TableCell>
                   </TableRow>
                 ))}
                 {!filteredSummary.length && (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center text-slate-500 py-8">
+                    <TableCell colSpan={9} className="text-center text-slate-500 py-8">
                       납부이력 자료가 없습니다. 정리된 ZIP 또는 CSV를 업로드해 주세요.
                     </TableCell>
                   </TableRow>
