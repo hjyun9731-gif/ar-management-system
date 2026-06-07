@@ -96,7 +96,7 @@ export function BillingPreviewModal({ open, onOpenChange, month }: BillingPrevie
               </div>
               <div className="border-t pt-2 flex justify-between text-sm font-bold">
                 <span>합계</span>
-                <span>{getBillingPreviewUnitAmountLabelV47(getBillingPreviewItemsV47())}원</span>
+                <span>항목별 적용</span>
               </div>
             </CardContent>
           </Card>
@@ -170,60 +170,3 @@ export function BillingPreviewModal({ open, onOpenChange, month }: BillingPrevie
   );
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-/* v47 safe helper: 부과 미리보기 항목별 단가 */
-function getBillingPreviewAmountByTypeV47(itemOrType: any): number {
-  const raw = typeof itemOrType === "string"
-    ? itemOrType
-    : String(itemOrType?.billingType || itemOrType?.billing_type || itemOrType?.billingItem || itemOrType?.billing_item || itemOrType?.부과항목 || "");
-  if (raw.includes("관리")) return 5000;
-  if (raw.includes("협회")) return 10000;
-  return 0;
-}
-
-function getBillingPreviewUnitAmountLabelV47(items: any[] = []): string {
-  const list = Array.isArray(items) ? items : [];
-  const amounts = Array.from(new Set(list.map(getBillingPreviewAmountByTypeV47).filter(Boolean)));
-  if (amounts.length === 1) return amounts[0].toLocaleString("ko-KR");
-  if (amounts.length > 1) return "협회비 10,000 / 관리비 5,000";
-  return "항목별";
-}
-
-function getBillingPreviewItemsV47(): any[] {
-  try {
-    if (typeof previewItems !== "undefined" && Array.isArray(previewItems)) return previewItems;
-  } catch {}
-  try {
-    if (typeof candidates !== "undefined" && Array.isArray(candidates)) return candidates;
-  } catch {}
-  try {
-    if (typeof billingPreview !== "undefined") {
-      const v: any = billingPreview;
-      if (Array.isArray(v?.items)) return v.items;
-      if (Array.isArray(v?.candidates)) return v.candidates;
-      if (Array.isArray(v?.targets)) return v.targets;
-    }
-  } catch {}
-  try {
-    if (typeof previewData !== "undefined") {
-      const v: any = previewData;
-      if (Array.isArray(v?.items)) return v.items;
-      if (Array.isArray(v?.candidates)) return v.candidates;
-      if (Array.isArray(v?.targets)) return v.targets;
-    }
-  } catch {}
-  return [];
-}
-/* v47 safe helper end */
