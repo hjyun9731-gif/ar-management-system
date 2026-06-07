@@ -100,3 +100,68 @@ export default function PaymentHistory() {
     </div>
   );
 }
+
+
+function splitCsvLineV49(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let quote = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (quote && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else {
+        quote = !quote;
+      }
+    } else if (ch === "," && !quote) {
+      out.push(cur);
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  out.push(cur);
+  return out.map((v) => v.trim());
+}
+
+function parsePreparedCsvV49(fileName: string, csvText: string): ParsedPaymentRow[] {
+  const lines = csvText.replace(/^\uFEFF/, "").split(/\r?\n/).filter((line) => line.trim());
+  if (lines.length < 2) return [];
+
+  const headers = splitCsvLineV49(lines[0]);
+  const idx = (names: string[]) => headers.findIndex((h) => names.includes(h));
+
+  const monthIdx = idx(["부과월", "billingMonth", "billing_month", "월"]);
+  const vehicleIdx = idx(["차량번호", "vehicleNo", "vehicle_no"]);
+  const nameIdx = idx(["성명", "name", "이름"]);
+  const regionIdx = idx(["지역", "region"]);
+  const accountIdx = idx(["계정", "account"]);
+  const typeIdx = idx(["부과항목", "billingType", "billing_type"]);
+  const expectedIdx = idx(["월부과액", "부과액", "expectedAmount", "expected_amount"]);
+  const paidIdx = idx(["추정납부액", "납부액", "입금액", "paidAmount", "paid_amount"]);
+  const unpaidIdx = idx(["당월잔액", "미수금액", "미납액", "unpaidAmount", "unpaid_amount"]);
+  const memoIdx = idx(["판정", "비고", "memo"]);
+
+  return lines.slice(1).map((line, i) => {
+    const cols = splitCsvLineV49(line);
+    return {
+      sourceFile: fileName,
+      sourceSheet: "CSV",
+      sourceRow: i + 2,
+      region: regionIdx >= 0 ? cols[regionIdx] : "",
+      account: accountIdx >= 0 ? cols[accountIdx] : "",
+      vehicleNo: vehicleIdx >= 0 ? cols[vehicleIdx] : "",
+      name: nameIdx >= 0 ? cols[nameIdx] : "",
+      billingMonth: monthIdx >= 0 ? cols[monthIdx] : "",
+      billingType: typeIdx >= 0 ? cols[typeIdx] : "",
+      expectedAmount: expectedIdx >= 0 ? amount(cols[expectedIdx]) : undefined,
+      paidAmount: paidIdx >= 0 ? amount(cols[paidIdx]) : 0,
+      unpaidAmount: unpaidIdx >= 0 ? amount(cols[unpaidIdx]) : 0,
+      memo: memoIdx >= 0 ? cols[memoIdx] : "정리완료 CSV",
+      rawText: line,
+      raw: cols,
+    };
+  }).filter((row) => row.vehicleNo && row.name && row.billingMonth);
+}
