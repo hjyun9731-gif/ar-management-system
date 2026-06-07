@@ -96,7 +96,7 @@ export function BillingPreviewModal({ open, onOpenChange, month }: BillingPrevie
               </div>
               <div className="border-t pt-2 flex justify-between text-sm font-bold">
                 <span>합계</span>
-                <span>{getBillingPreviewUnitAmountLabelV43(getBillingPreviewItemsV43()) : (typeof previewItems !== 'undefined' ? previewItems : (typeof candidates !== 'undefined' ? candidates : [])))}원</span>
+                <span>{getBillingAmountLabelV40(typeof previewData !== 'undefined' ? (previewData?.items || previewData?.candidates || []) : (typeof previewItems !== 'undefined' ? previewItems : (typeof candidates !== 'undefined' ? candidates : [])))}원</span>
               </div>
             </CardContent>
           </Card>
@@ -188,7 +188,7 @@ function getBillingTotalAmountV40(items: any[]): number {
   return (items || []).reduce((sum, item) => sum + getBillingAmountByTypeV40(item), 0);
 }
 
-function getBillingPreviewUnitAmountLabelV43(getBillingPreviewItemsV43()): string {
+function getBillingAmountLabelV40(items: any[]): string {
   const amounts = Array.from(new Set((items || []).map(getBillingAmountByTypeV40).filter(Boolean)));
   if (amounts.length === 1) return amounts[0].toLocaleString("ko-KR");
   if (amounts.length > 1) return "항목별";
@@ -201,43 +201,3 @@ function getBillingPreviewUnitAmountLabelV43(getBillingPreviewItemsV43()): strin
 
 
 /* v40 helper end */
-
-
-/* v43 helper: 부과 미리보기 항목별 단가 표시 */
-function getBillingPreviewUnitAmountLabelV43(items: any[]): string {
-  const list = Array.isArray(items) ? items : [];
-  const hasAssociation = list.some((item) => String(item?.billingType || item?.billing_type || item?.billingItem || item?.billing_item || item?.부과항목 || "").includes("협회"));
-  const hasManagement = list.some((item) => String(item?.billingType || item?.billing_type || item?.billingItem || item?.billing_item || item?.부과항목 || "").includes("관리"));
-
-  if (hasAssociation && hasManagement) return "협회비 10,000 / 관리비 5,000";
-  if (hasAssociation) return "10,000";
-  if (hasManagement) return "5,000";
-  return "항목별";
-}
-
-function getBillingPreviewItemsV43(): any[] {
-  try {
-    if (typeof previewItems !== "undefined" && Array.isArray(previewItems)) return previewItems;
-  } catch {}
-  try {
-    if (typeof candidates !== "undefined" && Array.isArray(candidates)) return candidates;
-  } catch {}
-  try {
-    if (typeof previewData !== "undefined") {
-      const anyPreviewData: any = previewData;
-      if (Array.isArray(anyPreviewData?.items)) return anyPreviewData.items;
-      if (Array.isArray(anyPreviewData?.candidates)) return anyPreviewData.candidates;
-      if (Array.isArray(anyPreviewData?.targets)) return anyPreviewData.targets;
-    }
-  } catch {}
-  try {
-    if (typeof billingPreview !== "undefined") {
-      const anyBillingPreview: any = billingPreview;
-      if (Array.isArray(anyBillingPreview?.items)) return anyBillingPreview.items;
-      if (Array.isArray(anyBillingPreview?.candidates)) return anyBillingPreview.candidates;
-      if (Array.isArray(anyBillingPreview?.targets)) return anyBillingPreview.targets;
-    }
-  } catch {}
-  return [];
-}
-/* v43 helper end */
