@@ -36,7 +36,7 @@ export function BillingPreviewModal({ open, onOpenChange, month }: BillingPrevie
     runBatchMutation.mutate({ month });
   };
 
-  const totalAmount = getBillingTotalAmountV39(candidates); // 협회비 10,000 + 관리비 5,000
+  const totalAmount = candidates.length * 15000; // 협회비 10,000 + 관리비 5,000
   const activeMembers = candidates.filter((c: any) => c.status !== "제외");
 
   return (
@@ -61,7 +61,7 @@ export function BillingPreviewModal({ open, onOpenChange, month }: BillingPrevie
 
             <Card className="border-2 border-green-200 bg-green-50">
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-medium text-gray-700">부과액(항목별)</CardTitle>
+                <CardTitle className="text-sm font-medium text-gray-700">부과액 (1인당)</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-green-900">15,000</div>
@@ -96,7 +96,7 @@ export function BillingPreviewModal({ open, onOpenChange, month }: BillingPrevie
               </div>
               <div className="border-t pt-2 flex justify-between text-sm font-bold">
                 <span>합계</span>
-                <span>{getBillingAmountLabelV39(previewData?.items || previewData?.candidates || previewItems || candidates || [])}원</span>
+                <span>15,000원</span>
               </div>
             </CardContent>
           </Card>
@@ -169,29 +169,3 @@ export function BillingPreviewModal({ open, onOpenChange, month }: BillingPrevie
     </Dialog>
   );
 }
-
-
-/* v39 helper: 부과항목별 금액 계산 */
-function getBillingAmountByTypeV39(itemOrType: any): number {
-  const raw = typeof itemOrType === "string"
-    ? itemOrType
-    : String(itemOrType?.billingType || itemOrType?.billing_type || itemOrType?.feeType || itemOrType?.chargeType || itemOrType?.billing_type_name || itemOrType?.billingItem || itemOrType?.billing_item || itemOrType?.부과항목 || "");
-  if (raw.includes("관리")) return 5000;
-  if (raw.includes("협회")) return 10000;
-
-  // 회원구분만 있는 경우 보조 판단: 택배회원은 관리비 가능성이 높지만,
-  // 실제 billingType이 없으면 안전하게 0원 처리해서 잘못 과대계산하지 않음.
-  return 0;
-}
-
-function getBillingTotalAmountV39(items: any[]): number {
-  return (items || []).reduce((sum, item) => sum + getBillingAmountByTypeV39(item), 0);
-}
-
-function getBillingAmountLabelV39(items: any[]): string {
-  const amounts = Array.from(new Set((items || []).map(getBillingAmountByTypeV39).filter(Boolean)));
-  if (amounts.length === 1) return amounts[0].toLocaleString("ko-KR");
-  if (amounts.length > 1) return "항목별";
-  return "0";
-}
-/* v39 helper end */

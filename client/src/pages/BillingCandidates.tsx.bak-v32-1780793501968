@@ -11,8 +11,6 @@ import { CandidateDetailModal } from "@/components/CandidateDetailModal";
 import { toast } from "sonner";
 
 const STATUS_STYLE: Record<string, string> = {
-  기존부과중: "bg-slate-50 text-slate-700 border border-slate-200",
-  반영완료: "bg-emerald-50 text-emerald-700 border border-emerald-200",
   대기: "bg-amber-50 text-amber-700 border border-amber-200",
   부과예정: "bg-sky-50 text-sky-700 border border-sky-200",
   부과반영완료: "bg-emerald-50 text-emerald-700 border border-emerald-200",
@@ -63,7 +61,7 @@ export default function BillingCandidates() {
   const { data: candidates = [], isLoading } = trpc.billing.listCandidates.useQuery({
     region: filters.region === "all" ? undefined : filters.region,
     memberType: filters.memberType === "all" ? undefined : filters.memberType,
-    status: filters.status === 'all' || filters.status === '전체' ? undefined : filters.status === "all" ? undefined : filters.status,
+    status: filters.status === "all" ? undefined : filters.status,
     billingStartMonth: filters.billingStartMonth || undefined,
   });
 
@@ -270,29 +268,3 @@ export default function BillingCandidates() {
     </div>
   );
 }
-
-
-/* v39 helper: 부과항목별 금액 계산 */
-function getBillingAmountByTypeV39(itemOrType: any): number {
-  const raw = typeof itemOrType === "string"
-    ? itemOrType
-    : String(itemOrType?.billingType || itemOrType?.billing_type || itemOrType?.feeType || itemOrType?.chargeType || itemOrType?.billing_type_name || itemOrType?.billingItem || itemOrType?.billing_item || itemOrType?.부과항목 || "");
-  if (raw.includes("관리")) return 5000;
-  if (raw.includes("협회")) return 10000;
-
-  // 회원구분만 있는 경우 보조 판단: 택배회원은 관리비 가능성이 높지만,
-  // 실제 billingType이 없으면 안전하게 0원 처리해서 잘못 과대계산하지 않음.
-  return 0;
-}
-
-function getBillingTotalAmountV39(items: any[]): number {
-  return (items || []).reduce((sum, item) => sum + getBillingAmountByTypeV39(item), 0);
-}
-
-function getBillingAmountLabelV39(items: any[]): string {
-  const amounts = Array.from(new Set((items || []).map(getBillingAmountByTypeV39).filter(Boolean)));
-  if (amounts.length === 1) return amounts[0].toLocaleString("ko-KR");
-  if (amounts.length > 1) return "항목별";
-  return "0";
-}
-/* v39 helper end */

@@ -223,29 +223,3 @@ export default function BillingRecords() {
     </div>
   );
 }
-
-
-/* v39 helper: 부과항목별 금액 계산 */
-function getBillingAmountByTypeV39(itemOrType: any): number {
-  const raw = typeof itemOrType === "string"
-    ? itemOrType
-    : String(itemOrType?.billingType || itemOrType?.billing_type || itemOrType?.feeType || itemOrType?.chargeType || itemOrType?.billing_type_name || itemOrType?.billingItem || itemOrType?.billing_item || itemOrType?.부과항목 || "");
-  if (raw.includes("관리")) return 5000;
-  if (raw.includes("협회")) return 10000;
-
-  // 회원구분만 있는 경우 보조 판단: 택배회원은 관리비 가능성이 높지만,
-  // 실제 billingType이 없으면 안전하게 0원 처리해서 잘못 과대계산하지 않음.
-  return 0;
-}
-
-function getBillingTotalAmountV39(items: any[]): number {
-  return (items || []).reduce((sum, item) => sum + getBillingAmountByTypeV39(item), 0);
-}
-
-function getBillingAmountLabelV39(items: any[]): string {
-  const amounts = Array.from(new Set((items || []).map(getBillingAmountByTypeV39).filter(Boolean)));
-  if (amounts.length === 1) return amounts[0].toLocaleString("ko-KR");
-  if (amounts.length > 1) return "항목별";
-  return "0";
-}
-/* v39 helper end */
