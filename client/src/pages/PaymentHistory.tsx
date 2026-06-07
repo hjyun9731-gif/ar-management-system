@@ -398,8 +398,8 @@ export default function PaymentHistory() {
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">납부이력 추적</h1>
-        <div className="text-xs text-emerald-600 font-semibold mt-1">v58 잔액변화 추정 표시 화면</div>
-        <div className="text-xs text-emerald-600 font-semibold mt-1">v56 업로드용 CSV만 읽는 화면</div>
+        <div className="text-xs text-emerald-600 font-semibold mt-1">v59 최신월 잔액 요약 화면</div>
+        <div className="text-xs text-emerald-600 font-semibold mt-1">v59 최신월 잔액 요약 화면</div>
         <p className="text-sm text-slate-500 mt-1">
           현재 부과대상자 기준으로 과거 엑셀/ZIP/CSV 전체 파일과 전체 시트를 읽어 월별 납부·미수금 이력을 매칭합니다.
         </p>
@@ -489,7 +489,7 @@ export default function PaymentHistory() {
                   <TableHead>부과시작일</TableHead>
                   <TableHead className="text-right">이력월수</TableHead>
                   <TableHead className="text-right">미납월수</TableHead>
-                  <TableHead className="text-right">현재/누적 잔액합계</TableHead>
+                  <TableHead className="text-right">현재잔액(최신월)</TableHead>
                   <TableHead>마지막 납부월</TableHead>
                 </TableRow>
               </TableHeader>

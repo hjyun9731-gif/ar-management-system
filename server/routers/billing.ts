@@ -1605,10 +1605,14 @@ export const billingRouter = router({
           unpaidMonths: 0,
           totalUnpaid: 0,
           lastPaidMonth: "",
+          latestMonth: "",
         };
 
         prev.historyCount += 1;
-        prev.totalUnpaid += numV57(row.unpaidAmount);
+        if (!prev.latestMonth || row.billingMonth >= prev.latestMonth) {
+          prev.latestMonth = row.billingMonth;
+          prev.totalUnpaid = numV57(row.unpaidAmount);
+        }
         if (numV57(row.unpaidAmount) > 0) prev.unpaidMonths += 1;
         if (numV57(row.paidAmount) > 0) {
           prev.paidMonths += 1;
