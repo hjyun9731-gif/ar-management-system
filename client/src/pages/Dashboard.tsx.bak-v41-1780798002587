@@ -340,6 +340,23 @@ function getBillingAmountLabelV40(items: any[]): string {
 
 
 /* v40 helper: 안전한 부과항목별 금액 계산 */
+function getBillingAmountByTypeV40(itemOrType: any): number {
+  const raw = typeof itemOrType === "string"
+    ? itemOrType
+    : String(itemOrType?.billingType || itemOrType?.billing_type || itemOrType?.billingItem || itemOrType?.billing_item || itemOrType?.chargeType || itemOrType?.부과항목 || "");
+  if (raw.includes("관리")) return 5000;
+  if (raw.includes("협회")) return 10000;
+  return 0;
+}
 
+function getBillingTotalAmountV40(items: any[]): number {
+  return (items || []).reduce((sum, item) => sum + getBillingAmountByTypeV40(item), 0);
+}
 
+function getBillingAmountLabelV40(items: any[]): string {
+  const amounts = Array.from(new Set((items || []).map(getBillingAmountByTypeV40).filter(Boolean)));
+  if (amounts.length === 1) return amounts[0].toLocaleString("ko-KR");
+  if (amounts.length > 1) return "항목별";
+  return "항목별";
+}
 /* v40 helper end */
