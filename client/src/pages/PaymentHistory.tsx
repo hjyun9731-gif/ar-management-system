@@ -47,7 +47,8 @@ export default function PaymentHistory() {
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">납부이력 추적</h1>
-        <p className="text-sm text-slate-500 mt-1">현재 부과대상자 기준으로 과거 납부·미수금 이력을 조회하는 화면입니다.</p>
+        <div className="text-xs text-emerald-600 font-semibold mt-1">v52 실제 업로드 화면</div>
+        <p className="text-sm text-slate-500 mt-1">현재 부과대상자 기준으로 과거 엑셀/ZIP/CSV 전체 파일과 전체 시트를 읽어 월별 납부·미수금 이력을 매칭합니다.</p>
       </div>
 
       <Card>
@@ -58,9 +59,9 @@ export default function PaymentHistory() {
           <input ref={fileRef} type="file" multiple accept=".xlsx,.xlsm,.xls,.zip,.csv,.txt" className="hidden" onChange={(e) => handleFiles(e.target.files)} />
           <Button onClick={() => fileRef.current?.click()}>
             <Upload className="w-4 h-4 mr-2" />
-            엑셀/ZIP 선택
+            엑셀/ZIP/CSV 선택
           </Button>
-          <div className="text-sm text-slate-500">현재 화면은 빌드 복구용 기본 화면입니다. 전체 엑셀 파싱은 안정화 후 연결합니다.</div>
+          <div className="text-sm text-slate-500">현재 부과대상자 기준으로 과거 엑셀/ZIP/CSV 전체 파일과 전체 시트를 읽어 월별 납부·미수금 이력을 매칭합니다.</div>
         </CardContent>
       </Card>
 
