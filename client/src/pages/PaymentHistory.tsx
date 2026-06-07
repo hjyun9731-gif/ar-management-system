@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import JSZip from "jszip";
 import * as XLSX from "xlsx";
-import { Upload, Search, Loader2, Database, FileSpreadsheet } from "lucide-react";
+import { Upload, Search, Loader2, Database, FileSpreadsheet, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,8 +23,21 @@ type ParsedPaymentRow = {
   paidAmount?: number;
   unpaidAmount?: number;
   memo?: string;
-  rawText?: string;
-  raw?: unknown;
+};
+
+type LocalSummaryRow = {
+  key: string;
+  vehicleNo: string;
+  name: string;
+  region: string;
+  account: string;
+  billingType: string;
+  billingStartMonth: string;
+  historyCount: number;
+  balanceMonths: number;
+  latestBalance: number;
+  latestMonth: string;
+  lastDecreaseMonth: string;
 };
 
 function cleanText(value: unknown): string {
@@ -155,7 +168,7 @@ function parsePreparedCsv(fileName: string, csvText: string): ParsedPaymentRow[]
       expectedAmount: expectedIdx >= 0 ? parseMoney(cols[expectedIdx]) : undefined,
       paidAmount: paidIdx >= 0 ? parseMoney(cols[paidIdx]) : 0,
       unpaidAmount: unpaidIdx >= 0 ? parseMoney(cols[unpaidIdx]) : 0,
-      memo: memoIdx >= 0 ? cols[memoIdx] : "잔액변화 기반 추정자료"
+      memo: memoIdx >= 0 ? cols[memoIdx] : "잔액변화 기반 추정자료",
     };
   }).filter((row) => row.vehicleNo && row.name && row.billingMonth);
 }
@@ -231,7 +244,7 @@ function parseSheet(fileName: string, sheetName: string, rows: unknown[][]): Par
           expectedAmount: billingType === "관리비" ? 5000 : billingType === "협회비" ? 10000 : undefined,
           paidAmount: 0,
           unpaidAmount,
-          memo: "월별 미수금 칸"
+          memo: "월별 미수금 칸",
         });
       }
       continue;
@@ -256,7 +269,7 @@ function parseSheet(fileName: string, sheetName: string, rows: unknown[][]): Par
       expectedAmount: billingType === "관리비" ? 5000 : billingType === "협회비" ? 10000 : undefined,
       paidAmount,
       unpaidAmount,
-      memo: "행 단위 추출"
+      memo: "행 단위 추출",
     });
   }
 
@@ -274,16 +287,54 @@ async function parseWorkbook(name: string, data: ArrayBuffer): Promise<ParsedPay
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: "" }) as unknown[][];
-    all.push(...parseSheet(name, sheetName, rows));
+    pushMany(all, parseSheet(name, sheetName, rows));
   }
   return all;
 }
 
+function pushMany<T>(target: T[], items: T[]) {
+  for (let i = 0; i < items.length; i++) target.push(items[i]);
+}
 
-function pushManyV55<T>(target: T[], items: T[]) {
-  for (let i = 0; i < items.length; i++) {
-    target.push(items[i]);
+function moneyLabel(value: number | undefined): string {
+  return Number(value || 0).toLocaleString() + "원";
+}
+
+function buildLocalSummary(rows: ParsedPaymentRow[]): LocalSummaryRow[] {
+  const map = new Map<string, LocalSummaryRow>();
+
+  for (const row of rows) {
+    const key = row.vehicleNo + "|" + row.name + "|" + (row.billingType || "");
+    const prev = map.get(key) || {
+      key,
+      vehicleNo: row.vehicleNo,
+      name: row.name,
+      region: row.region || "",
+      account: row.account || "",
+      billingType: row.billingType || "",
+      billingStartMonth: row.billingMonth,
+      historyCount: 0,
+      balanceMonths: 0,
+      latestBalance: 0,
+      latestMonth: row.billingMonth,
+      lastDecreaseMonth: "",
+    };
+
+    prev.historyCount += 1;
+    if (Number(row.unpaidAmount || 0) > 0) prev.balanceMonths += 1;
+    if (row.billingMonth < prev.billingStartMonth) prev.billingStartMonth = row.billingMonth;
+    if (row.billingMonth >= prev.latestMonth) {
+      prev.latestMonth = row.billingMonth;
+      prev.latestBalance = Number(row.unpaidAmount || 0);
+    }
+    if (Number(row.paidAmount || 0) > 0 && row.billingMonth >= (prev.lastDecreaseMonth || "")) {
+      prev.lastDecreaseMonth = row.billingMonth;
+    }
+
+    map.set(key, prev);
   }
+
+  return Array.from(map.values()).sort((a, b) => b.latestBalance - a.latestBalance || a.vehicleNo.localeCompare(b.vehicleNo));
 }
 
 export default function PaymentHistory() {
@@ -291,32 +342,60 @@ export default function PaymentHistory() {
   const [parsedRows, setParsedRows] = useState<ParsedPaymentRow[]>([]);
   const [isParsing, setIsParsing] = useState(false);
   const [search, setSearch] = useState("");
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
   const summaryQuery = trpc.billing.paymentHistorySummary.useQuery(undefined, { retry: false });
   const importMutation = trpc.billing.paymentHistoryImportRows.useMutation({
     onSuccess: (data: any) => {
-      toast.success("저장 " + Number(data.insertedCount || 0).toLocaleString() + "건 · 매칭 " + Number(data.matchedCount || 0).toLocaleString() + "건 · 미매칭 " + Number(data.unmatchedCount || 0).toLocaleString() + "건");
+      toast.success("저장 " + Number(data.insertedCount || 0).toLocaleString() + "건");
       summaryQuery.refetch();
     },
     onError: (error: any) => toast.error(error.message),
   });
 
-  const previewRows = useMemo(() => parsedRows.slice(0, 30), [parsedRows]);
+  const localSummary = useMemo(() => buildLocalSummary(parsedRows), [parsedRows]);
+
+  const summaryRows = useMemo(() => {
+    if (localSummary.length) return localSummary;
+    const serverRows = summaryQuery.data || [];
+    return serverRows.map((row: any) => ({
+      key: String(row.candidateId || row.vehicleNo + row.name),
+      vehicleNo: row.vehicleNo || "",
+      name: row.name || "",
+      region: row.region || "",
+      account: "",
+      billingType: row.billingType || "",
+      billingStartMonth: row.billingStartMonth || "",
+      historyCount: Number(row.historyCount || 0),
+      balanceMonths: Number(row.unpaidMonths || 0),
+      latestBalance: Number(row.totalUnpaid || 0),
+      latestMonth: row.latestMonth || "",
+      lastDecreaseMonth: row.lastPaidMonth || "",
+    }));
+  }, [localSummary, summaryQuery.data]);
 
   const filteredSummary = useMemo(() => {
-    const rows = summaryQuery.data || [];
     const q = search.trim();
-    if (!q) return rows;
-    return rows.filter((r: any) =>
-      String(r.vehicleNo || "").includes(q) ||
-      String(r.name || "").includes(q) ||
-      String(r.region || "").includes(q)
+    if (!q) return summaryRows;
+    return summaryRows.filter((r) =>
+      r.vehicleNo.includes(q) ||
+      r.name.includes(q) ||
+      r.region.includes(q) ||
+      r.billingType.includes(q)
     );
-  }, [summaryQuery.data, search]);
+  }, [summaryRows, search]);
+
+  const selectedDetailRows = useMemo(() => {
+    if (!selectedKey) return [];
+    return parsedRows
+      .filter((row) => row.vehicleNo + "|" + row.name + "|" + (row.billingType || "") === selectedKey)
+      .sort((a, b) => a.billingMonth.localeCompare(b.billingMonth));
+  }, [parsedRows, selectedKey]);
 
   const handleFiles = async (files: FileList | null) => {
     if (!files?.length) return;
     setIsParsing(true);
+    setSelectedKey(null);
     try {
       const allRows: ParsedPaymentRow[] = [];
 
@@ -324,14 +403,13 @@ export default function PaymentHistory() {
         if (file.name.toLowerCase().endsWith(".zip")) {
           const zip = await JSZip.loadAsync(await file.arrayBuffer());
           const allEntries = Object.values(zip.files).filter((entry) => !entry.dir);
-
           const preparedCsv = allEntries.find((entry) =>
             /프로그램업로드용.*잔액변화납부이력.*\.csv$/i.test(entry.name) ||
             /잔액변화납부이력.*\.csv$/i.test(entry.name)
           );
 
           if (preparedCsv) {
-            pushManyV55(allRows, parsePreparedCsv(preparedCsv.name, await preparedCsv.async("string")));
+            pushMany(allRows, parsePreparedCsv(preparedCsv.name, await preparedCsv.async("string")));
           } else {
             const entries = allEntries.filter((entry) =>
               /\.(xlsx|xlsm|xls|csv)$/i.test(entry.name) &&
@@ -340,21 +418,21 @@ export default function PaymentHistory() {
 
             for (const entry of entries) {
               if (/\.csv$/i.test(entry.name)) {
-                pushManyV55(allRows, parsePreparedCsv(entry.name, await entry.async("string")));
+                pushMany(allRows, parsePreparedCsv(entry.name, await entry.async("string")));
               } else {
-                pushManyV55(allRows, await parseWorkbook(entry.name, await entry.async("arraybuffer")));
+                pushMany(allRows, await parseWorkbook(entry.name, await entry.async("arraybuffer")));
               }
             }
           }
         } else if (/\.csv$/i.test(file.name)) {
-          pushManyV55(allRows, parsePreparedCsv(file.name, await file.text()));
+          pushMany(allRows, parsePreparedCsv(file.name, await file.text()));
         } else if (/\.(xlsx|xlsm|xls)$/i.test(file.name)) {
-          pushManyV55(allRows, await parseWorkbook(file.name, await file.arrayBuffer()));
+          pushMany(allRows, await parseWorkbook(file.name, await file.arrayBuffer()));
         }
       }
 
       setParsedRows(allRows);
-      toast.success("전체 파일/시트에서 " + allRows.length.toLocaleString() + "건 추출");
+      toast.success("추출 완료: " + allRows.length.toLocaleString() + "건");
     } catch (error: any) {
       toast.error(error.message || "파일 파싱 실패");
     } finally {
@@ -398,10 +476,9 @@ export default function PaymentHistory() {
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">납부이력 추적</h1>
-        <div className="text-xs text-emerald-600 font-semibold mt-1">v59 최신월 잔액 요약 화면</div>
-        <div className="text-xs text-emerald-600 font-semibold mt-1">v59 최신월 잔액 요약 화면</div>
+        <div className="text-xs text-emerald-600 font-semibold mt-1">v60 요약 중심 · 상세 클릭 화면</div>
         <p className="text-sm text-slate-500 mt-1">
-          현재 부과대상자 기준으로 과거 엑셀/ZIP/CSV 전체 파일과 전체 시트를 읽어 월별 납부·미수금 이력을 매칭합니다.
+          현재 부과대상자 기준으로 과거 엑셀/ZIP/CSV를 읽어 사람별 요약을 먼저 보고, 차량번호를 클릭하면 월별 상세를 확인합니다.
         </p>
       </div>
 
@@ -414,7 +491,7 @@ export default function PaymentHistory() {
         </CardHeader>
         <CardContent className="space-y-3">
           <input ref={fileRef} type="file" multiple accept=".xlsx,.xlsm,.xls,.zip,.csv" className="hidden" onChange={(e) => handleFiles(e.target.files)} />
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2 items-center">
             <Button onClick={() => fileRef.current?.click()} disabled={isParsing}>
               {isParsing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Upload className="w-4 h-4 mr-2" />}
               엑셀/ZIP/CSV 선택
@@ -423,47 +500,13 @@ export default function PaymentHistory() {
               {importMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Database className="w-4 h-4 mr-2" />}
               추출자료 저장
             </Button>
-          </div>
-          <div className="text-sm text-slate-600">
-            추출 후보: <b>{parsedRows.length.toLocaleString()}</b>건
+            <span className="text-sm text-slate-600">
+              추출: <b>{parsedRows.length.toLocaleString()}</b>건 / 요약: <b>{localSummary.length.toLocaleString()}</b>명
+            </span>
           </div>
           <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-            잔액감소(추정)는 실제 통장 입금액이 아니라 전월잔액 + 월부과액 - 당월잔액으로 역산한 금액입니다.
-            여러 달 미납을 한 번에 정리한 달은 343,000원처럼 크게 표시될 수 있습니다.
+            기본 화면에는 사람별 요약만 표시합니다. 잔액감소(추정)는 실제 통장 입금액이 아니라 잔액 변화로 역산한 값이므로, 차량번호를 클릭한 상세에서만 확인합니다.
           </div>
-
-          {!!previewRows.length && (
-            <div className="overflow-x-auto border rounded-md">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>차량번호</TableHead>
-                    <TableHead>성명</TableHead>
-                    <TableHead>월</TableHead>
-                    <TableHead>부과항목</TableHead>
-                    <TableHead className="text-right">월부과액</TableHead>
-                    <TableHead className="text-right">잔액감소(추정)</TableHead>
-                    <TableHead className="text-right">당월잔액</TableHead>
-                    <TableHead>원본</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {previewRows.map((row, index) => (
-                    <TableRow key={index}>
-                      <TableCell>{row.vehicleNo}</TableCell>
-                      <TableCell>{row.name}</TableCell>
-                      <TableCell>{row.billingMonth}</TableCell>
-                      <TableCell>{row.billingType || "-"}</TableCell>
-                      <TableCell className="text-right">{Number(row.expectedAmount || 0).toLocaleString()}원</TableCell>
-                      <TableCell className="text-right">{Number(row.paidAmount || 0).toLocaleString()}원</TableCell>
-                      <TableCell className="text-right text-red-600">{Number(row.unpaidAmount || 0).toLocaleString()}원</TableCell>
-                      <TableCell className="text-xs text-slate-500">{row.sourceFile} / {row.sourceSheet}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
         </CardContent>
       </Card>
 
@@ -484,34 +527,34 @@ export default function PaymentHistory() {
                   <TableHead>차량번호</TableHead>
                   <TableHead>성명</TableHead>
                   <TableHead>지역</TableHead>
-                  <TableHead>회원구분</TableHead>
                   <TableHead>부과항목</TableHead>
-                  <TableHead>부과시작일</TableHead>
+                  <TableHead>부과시작월</TableHead>
                   <TableHead className="text-right">이력월수</TableHead>
-                  <TableHead className="text-right">미납월수</TableHead>
+                  <TableHead className="text-right">잔액발생월수</TableHead>
                   <TableHead className="text-right">현재잔액(최신월)</TableHead>
-                  <TableHead>마지막 납부월</TableHead>
+                  <TableHead>최신월</TableHead>
+                  <TableHead>마지막 잔액감소월</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredSummary.map((row: any) => (
-                  <TableRow key={row.candidateId}>
-                    <TableCell className="font-mono font-semibold">{row.vehicleNo}</TableCell>
+                {filteredSummary.map((row) => (
+                  <TableRow key={row.key} className="cursor-pointer hover:bg-slate-50" onClick={() => setSelectedKey(row.key)}>
+                    <TableCell className="font-mono font-semibold text-blue-700 underline">{row.vehicleNo}</TableCell>
                     <TableCell>{row.name}</TableCell>
-                    <TableCell>{row.region}</TableCell>
-                    <TableCell>{row.memberType}</TableCell>
-                    <TableCell>{row.billingType}</TableCell>
-                    <TableCell>{row.billingStartMonth}</TableCell>
-                    <TableCell className="text-right">{Number(row.historyCount || 0).toLocaleString()}</TableCell>
-                    <TableCell className="text-right">{Number(row.unpaidMonths || 0).toLocaleString()}</TableCell>
-                    <TableCell className="text-right font-semibold text-red-600">{Number(row.totalUnpaid || 0).toLocaleString()}원</TableCell>
-                    <TableCell>{row.lastPaidMonth || "-"}</TableCell>
+                    <TableCell>{row.region || "-"}</TableCell>
+                    <TableCell>{row.billingType || "-"}</TableCell>
+                    <TableCell>{row.billingStartMonth || "-"}</TableCell>
+                    <TableCell className="text-right">{row.historyCount.toLocaleString()}</TableCell>
+                    <TableCell className="text-right">{row.balanceMonths.toLocaleString()}</TableCell>
+                    <TableCell className="text-right font-semibold text-red-600">{moneyLabel(row.latestBalance)}</TableCell>
+                    <TableCell>{row.latestMonth || "-"}</TableCell>
+                    <TableCell>{row.lastDecreaseMonth || "-"}</TableCell>
                   </TableRow>
                 ))}
                 {!filteredSummary.length && (
                   <TableRow>
                     <TableCell colSpan={10} className="text-center text-slate-500 py-8">
-                      납부이력 자료가 없습니다. 정리된 ZIP 또는 CSV를 업로드한 뒤 추출자료 저장을 눌러주세요.
+                      납부이력 자료가 없습니다. 정리된 ZIP 또는 CSV를 업로드해 주세요.
                     </TableCell>
                   </TableRow>
                 )}
@@ -520,6 +563,51 @@ export default function PaymentHistory() {
           </div>
         </CardContent>
       </Card>
+
+      {selectedKey && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-6">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-6xl max-h-[85vh] overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b">
+              <div>
+                <div className="font-bold text-lg">월별 상세 이력</div>
+                <div className="text-sm text-slate-500">
+                  {selectedDetailRows[0]?.vehicleNo} / {selectedDetailRows[0]?.name} / {selectedDetailRows[0]?.billingType || "-"}
+                </div>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setSelectedKey(null)}>
+                <X className="w-4 h-4 mr-1" />
+                닫기
+              </Button>
+            </div>
+            <div className="overflow-auto max-h-[70vh] p-4">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>월</TableHead>
+                    <TableHead>부과항목</TableHead>
+                    <TableHead className="text-right">월부과액</TableHead>
+                    <TableHead className="text-right">잔액감소(추정)</TableHead>
+                    <TableHead className="text-right">당월잔액</TableHead>
+                    <TableHead>원본</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {selectedDetailRows.map((row, index) => (
+                    <TableRow key={index}>
+                      <TableCell>{row.billingMonth}</TableCell>
+                      <TableCell>{row.billingType || "-"}</TableCell>
+                      <TableCell className="text-right">{moneyLabel(row.expectedAmount)}</TableCell>
+                      <TableCell className="text-right">{moneyLabel(row.paidAmount)}</TableCell>
+                      <TableCell className="text-right font-semibold text-red-600">{moneyLabel(row.unpaidAmount)}</TableCell>
+                      <TableCell className="text-xs text-slate-500">{row.sourceFile} / {row.sourceSheet}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
