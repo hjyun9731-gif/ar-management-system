@@ -130,7 +130,7 @@ export default function BillingCandidates() {
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-950">다음 달 부과 대상</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-950">부과 대상 전체 명단</h1>
           <p className="mt-1 text-sm text-slate-500">회원관리시스템에서 추출한 협회비·관리비 부과 대상자를 확인하고 관리합니다.</p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -187,6 +187,8 @@ export default function BillingCandidates() {
                 <SelectItem value="부과예정">부과예정</SelectItem>
                 <SelectItem value="부과반영완료">부과반영완료</SelectItem>
                 <SelectItem value="확인필요">확인필요</SelectItem>
+<SelectItem value="기존부과중">기존부과중</SelectItem>
+<SelectItem value="반영완료">반영완료</SelectItem>
                 <SelectItem value="보류">보류</SelectItem>
                 <SelectItem value="제외">제외</SelectItem>
               </SelectContent>

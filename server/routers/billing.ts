@@ -967,7 +967,7 @@ export const billingRouter = router({
 
         // 해당 회원의 부과 상태를 "제외"로 변경
         await updateBillingCandidate((member as any).id, {
-          status: "제외",
+          status: "성공",
           memo: `${input.closureType} 처리: ${input.sourceSystemId}`,
         } as any);
 
@@ -1391,7 +1391,7 @@ export const billingRouter = router({
 
             if (item.matchedCandidateId) {
               await updateBillingCandidate(item.matchedCandidateId, {
-                status: "제외",
+                status: "성공",
                 memo: `${row.closureType} 처리(불러오기): ${row.sourceSystemId}`,
               } as any);
             }
