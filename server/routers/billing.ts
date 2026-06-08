@@ -1253,6 +1253,159 @@ async function getPaymentHistoryStatsV73() {
 }
 /* v73 payment history summary calculation fix end */
 
+
+/* v76 payment history table + emptyQuery hard guard */
+function patchPaymentHistoryPoolEmptyQueryV76(pool: any): any {
+  if (!pool || pool.__paymentHistoryEmptyQueryGuardV76) return pool;
+
+  const originalQuery = pool.query?.bind(pool);
+  if (typeof originalQuery !== "function") return pool;
+
+  pool.query = (queryTextOrConfig: any, ...args: any[]) => {
+    const sqlText = typeof queryTextOrConfig === "string"
+      ? queryTextOrConfig
+      : queryTextOrConfig && typeof queryTextOrConfig.text === "string"
+        ? queryTextOrConfig.text
+        : null;
+
+    if (typeof sqlText === "string" && sqlText.trim() === "") {
+      console.warn("[payment-history:v76] blocked empty database query");
+      return Promise.resolve({ rows: [], rowCount: 0, command: "EMPTY_QUERY_BLOCKED" });
+    }
+
+    return originalQuery(queryTextOrConfig, ...args);
+  };
+
+  Object.defineProperty(pool, "__paymentHistoryEmptyQueryGuardV76", {
+    value: true,
+    enumerable: false,
+    configurable: false,
+  });
+
+  return pool;
+}
+
+function getPaymentHistoryPoolSafeV76(): any {
+  return patchPaymentHistoryPoolEmptyQueryV76(getPaymentHistoryPoolV61());
+}
+
+async function ensurePaymentHistoryReadyV76(): Promise<any> {
+  const pool = getPaymentHistoryPoolSafeV76();
+
+  try {
+    if (typeof ensurePaymentHistoryTablesV61 === "function") {
+      await ensurePaymentHistoryTablesV61();
+    }
+  } catch (error) {
+    console.warn("[payment-history:v76] ensurePaymentHistoryTablesV61 failed; creating table directly", error);
+  }
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS payment_history_rows (
+      id SERIAL PRIMARY KEY,
+      vehicle_no TEXT,
+      vehicle_no_norm TEXT NOT NULL,
+      name TEXT NOT NULL,
+      region TEXT,
+      account TEXT,
+      billing_type TEXT NOT NULL,
+      billing_month TEXT NOT NULL,
+      expected_amount INTEGER DEFAULT 0,
+      balance_decrease_amount INTEGER DEFAULT 0,
+      current_balance_amount INTEGER DEFAULT 0,
+      memo TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`ALTER TABLE payment_history_rows ADD COLUMN IF NOT EXISTS account TEXT`);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_history_row ON payment_history_rows(vehicle_no_norm, name, billing_type, billing_month)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_history_vehicle ON payment_history_rows(vehicle_no_norm)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_history_name ON payment_history_rows(name)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_history_month ON payment_history_rows(billing_month)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_history_type ON payment_history_rows(billing_type)`);
+
+  return pool;
+}
+
+async function paymentHistoryTableExistsV76(pool: any): Promise<boolean> {
+  const result = await pool.query("SELECT to_regclass('public.payment_history_rows') AS table_name");
+  return !!result.rows?.[0]?.table_name;
+}
+
+async function getPaymentHistorySummaryV76() {
+  const pool = await ensurePaymentHistoryReadyV76();
+  const exists = await paymentHistoryTableExistsV76(pool);
+  if (!exists) return [];
+
+  const countResult = await pool.query("SELECT COUNT(*)::int AS count FROM payment_history_rows");
+  if (!Number(countResult.rows?.[0]?.count || 0)) return [];
+
+  const sql = [
+    "WITH grouped AS (",
+    "  SELECT",
+    "    vehicle_no_norm,",
+    "    name,",
+    "    billing_type,",
+    "    MIN(vehicle_no) AS vehicle_no,",
+    "    MAX(region) AS region,",
+    "    MAX(account) AS account,",
+    "    MIN(billing_month) AS billing_start_month,",
+    "    MAX(billing_month) AS latest_month,",
+    "    COUNT(*)::int AS history_count,",
+    "    SUM(CASE WHEN COALESCE(current_balance_amount, 0) > 0 THEN 1 ELSE 0 END)::int AS unpaid_months,",
+    "    COALESCE(SUM(CASE WHEN COALESCE(current_balance_amount, 0) > 0 THEN current_balance_amount ELSE 0 END), 0)::int AS total_unpaid,",
+    "    MAX(CASE WHEN COALESCE(balance_decrease_amount, 0) > 0 THEN billing_month ELSE NULL END) AS last_paid_month,",
+    "    MIN(CASE WHEN COALESCE(current_balance_amount, 0) > 0 THEN billing_month ELSE NULL END) AS first_unpaid_month",
+    "  FROM payment_history_rows",
+    "  GROUP BY vehicle_no_norm, name, billing_type",
+    "), latest AS (",
+    "  SELECT DISTINCT ON (vehicle_no_norm, name, billing_type)",
+    "    vehicle_no_norm, name, billing_type, billing_month, current_balance_amount AS latest_balance",
+    "  FROM payment_history_rows",
+    "  ORDER BY vehicle_no_norm, name, billing_type, billing_month DESC",
+    ")",
+    "SELECT",
+    "  grouped.vehicle_no_norm || '|' || grouped.name || '|' || grouped.billing_type AS \"candidateId\",",
+    "  grouped.vehicle_no AS \"vehicleNo\",",
+    "  grouped.name AS \"name\",",
+    "  grouped.region AS \"region\",",
+    "  grouped.account AS \"account\",",
+    "  grouped.billing_type AS \"billingType\",",
+    "  grouped.billing_start_month AS \"billingStartMonth\",",
+    "  grouped.history_count AS \"historyCount\",",
+    "  grouped.unpaid_months AS \"unpaidMonths\",",
+    "  grouped.unpaid_months AS \"arrearsMonths\",",
+    "  grouped.total_unpaid AS \"totalUnpaid\",",
+    "  grouped.total_unpaid AS \"arrearsAmount\",",
+    "  grouped.latest_month AS \"latestMonth\",",
+    "  grouped.last_paid_month AS \"lastPaidMonth\",",
+    "  grouped.last_paid_month AS \"recentPaymentMonth\",",
+    "  grouped.first_unpaid_month AS \"arrearsStartMonth\",",
+    "  COALESCE(latest.latest_balance, 0)::int AS \"latestBalance\"",
+    "FROM grouped",
+    "LEFT JOIN latest",
+    "  ON latest.vehicle_no_norm = grouped.vehicle_no_norm",
+    " AND latest.name = grouped.name",
+    " AND latest.billing_type = grouped.billing_type",
+    "ORDER BY grouped.total_unpaid DESC, grouped.unpaid_months DESC, grouped.vehicle_no ASC"
+  ].join("\n");
+
+  const result = await pool.query(sql);
+  return result.rows || [];
+}
+
+async function getPaymentHistoryStatsV76() {
+  const rows = await getPaymentHistorySummaryV76();
+  return {
+    trackedMembers: rows.length,
+    currentBalanceTotal: rows.reduce((sum: number, row: any) => sum + Number(row.totalUnpaid || row.arrearsAmount || 0), 0),
+    membersWithBalance: rows.filter((row: any) => Number(row.totalUnpaid || row.arrearsAmount || 0) > 0).length,
+  };
+}
+/* v76 payment history table + emptyQuery hard guard end */
+
 export const billingRouter = router({
   // 부과대상 등록 연동 API
   syncMembers: publicProcedure
@@ -1939,18 +2092,34 @@ export const billingRouter = router({
     }),
 
 
+
   paymentHistorySummary: publicProcedure
     .query(async () => {
-      return await getPaymentHistorySummaryV73();
+      try {
+        return await getPaymentHistorySummaryV76();
+      } catch (error) {
+        console.error("[payment-history:v76] paymentHistorySummary failed", error);
+        return [];
+      }
     }),
 
   paymentHistoryStats: publicProcedure
     .query(async () => {
-      return await getPaymentHistoryStatsV73();
+      try {
+        return await getPaymentHistoryStatsV76();
+      } catch (error) {
+        console.error("[payment-history:v76] paymentHistoryStats failed", error);
+        return { trackedMembers: 0, currentBalanceTotal: 0, membersWithBalance: 0 };
+      }
     }),
   paymentHistoryCurrentArrears: publicProcedure
     .query(async () => {
-      return await getPaymentHistoryCurrentArrearsV73();
+      try {
+        return await getPaymentHistorySummaryV76();
+      } catch (error) {
+        console.error("[payment-history:v76] paymentHistoryCurrentArrears failed", error);
+        return [];
+      }
     }),
 });
 
