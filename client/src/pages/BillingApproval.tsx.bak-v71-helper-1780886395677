@@ -9,7 +9,7 @@ import { trpc } from "@/lib/trpc";
 
 
 /* v70 helper: 부과항목별 금액 계산 강제 복구 */
-function getBillingAmountByTypeV71(itemOrType: any): number {
+function getBillingAmountByTypeV70(itemOrType: any): number {
   const raw = typeof itemOrType === "string"
     ? itemOrType
     : String(
@@ -36,12 +36,12 @@ function getBillingAmountByTypeV71(itemOrType: any): number {
   return Number.isFinite(direct) ? direct : 0;
 }
 
-function getBillingTotalAmountV71(items: any[] = []): number {
-  return (items || []).reduce((sum, item) => sum + getBillingAmountByTypeV71(item), 0);
+function getBillingTotalAmountV70(items: any[] = []): number {
+  return (items || []).reduce((sum, item) => sum + getBillingAmountByTypeV70(item), 0);
 }
 
-function getBillingAmountLabelV71(items: any[] = []): string {
-  const amounts = Array.from(new Set((items || []).map(getBillingAmountByTypeV71).filter(Boolean)));
+function getBillingAmountLabelV70(items: any[] = []): string {
+  const amounts = Array.from(new Set((items || []).map(getBillingAmountByTypeV70).filter(Boolean)));
   if (amounts.length === 1) return amounts[0].toLocaleString("ko-KR");
   if (amounts.length > 1) return "혼합";
   return "0";
@@ -201,7 +201,7 @@ export default function BillingApproval() {
             month={currentMonth}
             label="이번 달 부과 예정"
             count={thisMonthCandidates.length}
-            estimatedAmount={getBillingTotalAmountV71(thisMonthCandidates)}
+            estimatedAmount={getBillingTotalAmountV70(thisMonthCandidates)}
             variant="primary"
             onAction={() => handlePreview(currentMonth)}
             actionLabel="부과 반영"
@@ -210,7 +210,7 @@ export default function BillingApproval() {
             month={nextMonth}
             label="다음 달 부과 예정"
             count={nextMonthCandidates.length}
-            estimatedAmount={getBillingTotalAmountV71(nextMonthCandidates)}
+            estimatedAmount={getBillingTotalAmountV70(nextMonthCandidates)}
             variant="secondary"
             onAction={() => handlePreview(nextMonth)}
             actionLabel="미리보기"
