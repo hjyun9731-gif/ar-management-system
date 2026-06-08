@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Search, AlertCircle, FileSearch, Users, Banknote } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 
@@ -47,20 +48,26 @@ function TableSkeleton() {
 
 export default function BillingRecords() {
   const [search, setSearch] = useState("");
+  const [arrearsFilter, setArrearsFilter] = useState("all");
   const query = trpc.billing.paymentHistoryCurrentArrears.useQuery(undefined, { retry: false });
 
   const rows = (query.data || []) as ArrearsRow[];
 
   const filteredRows = useMemo(() => {
+    let list = rows;
     const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((row) =>
-      String(row.vehicleNo || "").toLowerCase().includes(q) ||
-      String(row.name || "").toLowerCase().includes(q) ||
-      String(row.region || "").toLowerCase().includes(q) ||
-      String(row.billingType || "").toLowerCase().includes(q)
-    );
-  }, [rows, search]);
+    if (q) {
+      list = list.filter((row) =>
+        String(row.vehicleNo || "").toLowerCase().includes(q) ||
+        String(row.name || "").toLowerCase().includes(q) ||
+        String(row.region || "").toLowerCase().includes(q) ||
+        String(row.billingType || "").toLowerCase().includes(q)
+      );
+    }
+    if (arrearsFilter === "있음") list = list.filter((row) => Number(row.arrearsAmount || 0) > 0);
+    if (arrearsFilter === "없음") list = list.filter((row) => Number(row.arrearsAmount || 0) <= 0);
+    return list;
+  }, [rows, search, arrearsFilter]);
 
   const totalAmount = useMemo(() => rows.reduce((sum, row) => sum + Number(row.arrearsAmount || 0), 0), [rows]);
   const arrearsPeople = useMemo(() => rows.filter((row) => Number(row.arrearsAmount || 0) > 0).length, [rows]);
@@ -100,14 +107,24 @@ export default function BillingRecords() {
         <CardHeader className="pb-3 pt-4 px-5 border-b border-slate-100">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
             <CardTitle className="text-sm font-semibold text-slate-700">납부이력 연동 요약</CardTitle>
-            <div className="relative w-full md:w-64">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <Input
-                className="pl-9 h-9 text-sm"
-                placeholder="차량번호/성명/지역/부과항목 검색"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
+            <div className="flex items-center gap-2">
+              <div className="relative w-56">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <Input
+                  className="pl-9 h-9 text-sm"
+                  placeholder="차량번호/성명/지역/부과항목 검색"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </div>
+              <Select value={arrearsFilter} onValueChange={setArrearsFilter}>
+                <SelectTrigger className="h-9 text-sm w-28"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">미수금 전체</SelectItem>
+                  <SelectItem value="있음">있음</SelectItem>
+                  <SelectItem value="없음">없음</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </CardHeader>

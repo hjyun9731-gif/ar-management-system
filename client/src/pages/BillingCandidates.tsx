@@ -40,6 +40,7 @@ function TableSkeleton() {
 export default function BillingCandidates() {
   const [region, setRegion] = useState("all");
   const [memberType, setMemberType] = useState("all");
+  const [arrearsFilter, setArrearsFilter] = useState("all");
   const [searchText, setSearchText] = useState("");
   const [selectedCandidateId, setSelectedCandidateId] = useState<number | null>(null);
 
@@ -50,13 +51,18 @@ export default function BillingCandidates() {
   });
 
   const filteredCandidates = useMemo(() => {
-    if (!searchText.trim()) return candidates as any[];
-    const q = searchText.trim().toLowerCase();
-    return (candidates as any[]).filter((c) =>
-      String(c.vehicleNo || "").toLowerCase().includes(q) ||
-      String(c.name || "").toLowerCase().includes(q)
-    );
-  }, [candidates, searchText]);
+    let list = candidates as any[];
+    if (searchText.trim()) {
+      const q = searchText.trim().toLowerCase();
+      list = list.filter((c) =>
+        String(c.vehicleNo || "").toLowerCase().includes(q) ||
+        String(c.name || "").toLowerCase().includes(q)
+      );
+    }
+    if (arrearsFilter === "있음") list = list.filter((c) => Number(c.currentArAmount || 0) > 0);
+    if (arrearsFilter === "없음") list = list.filter((c) => Number(c.currentArAmount || 0) <= 0);
+    return list;
+  }, [candidates, searchText, arrearsFilter]);
 
   const arrearsCount = useMemo(
     () => (filteredCandidates as any[]).filter((c) => Number(c.currentArAmount || 0) > 0).length,
@@ -123,7 +129,7 @@ export default function BillingCandidates() {
           </CardTitle>
         </CardHeader>
         <CardContent className="px-5 py-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
             <div>
               <label className="text-xs font-medium text-slate-500 block mb-1.5">차량번호 / 성명</label>
               <div className="relative">
@@ -156,6 +162,17 @@ export default function BillingCandidates() {
                   <SelectItem value="all">전체</SelectItem>
                   <SelectItem value="개인회원">개인회원</SelectItem>
                   <SelectItem value="택배회원">택배회원</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-500 block mb-1.5">미수금 여부</label>
+              <Select value={arrearsFilter} onValueChange={setArrearsFilter}>
+                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">전체</SelectItem>
+                  <SelectItem value="있음">있음</SelectItem>
+                  <SelectItem value="없음">없음</SelectItem>
                 </SelectContent>
               </Select>
             </div>
