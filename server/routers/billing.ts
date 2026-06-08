@@ -18,6 +18,41 @@ import { TRPCError } from "@trpc/server";
 import { eq, like } from "drizzle-orm";
 import { billingCandidates } from "../../drizzle/schema";
 
+
+// v77 hard guard: PostgreSQL throws "Received unexpected emptyQuery message from backend"
+// when pool.query receives an empty SQL string. This wrapper makes empty SQL a safe no-op
+// so payment-history screens do not crash while initial/empty states are loading.
+async function safeBillingPoolQueryV77(dbPool: any, queryOrConfig: any, ...args: any[]) {
+  const isEmptyString = typeof queryOrConfig === 'string' && queryOrConfig.trim() === '';
+  const isEmptyConfig = queryOrConfig && typeof queryOrConfig === 'object' && typeof queryOrConfig.text === 'string' && queryOrConfig.text.trim() === '';
+
+  if (isEmptyString || isEmptyConfig || queryOrConfig == null) {
+    return {
+      command: 'EMPTY',
+      rowCount: 0,
+      oid: null,
+      rows: [],
+      fields: [],
+    };
+  }
+
+  try {
+    return await dbPool.query(queryOrConfig, ...args);
+  } catch (error: any) {
+    const msg = String(error?.message || error || '');
+    if (msg.includes('emptyQuery') || msg.includes('unexpected emptyQuery')) {
+      return {
+        command: 'EMPTY',
+        rowCount: 0,
+        oid: null,
+        rows: [],
+        fields: [],
+      };
+    }
+    throw error;
+  }
+}
+
 // 회원관리시스템 날짜 포맷 정규화
 // 지원 예: 18.10.24 -> 2018-10-24, 2018.10.24 -> 2018-10-24, 18-10-24 -> 2018-10-24
 function normalizeDateString(value: any): string | undefined {
@@ -907,7 +942,7 @@ function numV61(value: any): number {
 async function ensurePaymentHistoryTablesV61() {
   const pool = getPaymentHistoryPoolSafeV75();
 
-  await pool.query(`
+  await safeBillingPoolQueryV77(pool, `
     CREATE TABLE IF NOT EXISTS payment_history_imports (
       id BIGSERIAL PRIMARY KEY,
       file_name TEXT,
@@ -919,7 +954,7 @@ async function ensurePaymentHistoryTablesV61() {
     )
   `);
 
-  await pool.query(`
+  await safeBillingPoolQueryV77(pool, `
     CREATE TABLE IF NOT EXISTS payment_history_rows (
       id BIGSERIAL PRIMARY KEY,
       source_file TEXT,
@@ -942,10 +977,10 @@ async function ensurePaymentHistoryTablesV61() {
     )
   `);
 
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_history_vehicle ON payment_history_rows(vehicle_no_norm)`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_history_name ON payment_history_rows(name)`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_history_month ON payment_history_rows(billing_month)`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_history_type ON payment_history_rows(billing_type)`);
+  await safeBillingPoolQueryV77(pool, `CREATE INDEX IF NOT EXISTS idx_payment_history_vehicle ON payment_history_rows(vehicle_no_norm)`);
+  await safeBillingPoolQueryV77(pool, `CREATE INDEX IF NOT EXISTS idx_payment_history_name ON payment_history_rows(name)`);
+  await safeBillingPoolQueryV77(pool, `CREATE INDEX IF NOT EXISTS idx_payment_history_month ON payment_history_rows(billing_month)`);
+  await safeBillingPoolQueryV77(pool, `CREATE INDEX IF NOT EXISTS idx_payment_history_type ON payment_history_rows(billing_type)`);
 }
 
 async function insertPaymentHistoryRowsV61(input: any) {
@@ -1054,7 +1089,7 @@ async function getPaymentHistorySummaryV61() {
   await ensurePaymentHistoryTablesV61();
 
   const pool = getPaymentHistoryPoolSafeV75();
-  const result = await pool.query(`
+  const result = await safeBillingPoolQueryV77(pool, `
     WITH latest AS (
       SELECT DISTINCT ON (vehicle_no_norm, name, billing_type)
         vehicle_no_norm,
@@ -1108,7 +1143,7 @@ async function getPaymentHistoryStatsV61() {
   await ensurePaymentHistoryTablesV61();
 
   const pool = getPaymentHistoryPoolSafeV75();
-  const result = await pool.query(`
+  const result = await safeBillingPoolQueryV77(pool, `
     WITH latest AS (
       SELECT DISTINCT ON (vehicle_no_norm, name, billing_type)
         vehicle_no_norm, name, billing_type, current_balance_amount
@@ -1170,7 +1205,7 @@ function getPaymentHistoryPoolSafeV75(): any {
 
 /* v73 payment history summary calculation fix */
 async function paymentHistoryTableExistsV73(pool: any): Promise<boolean> {
-  const result = await pool.query("SELECT to_regclass('public.payment_history_rows') AS table_name");
+  const result = await safeBillingPoolQueryV77(pool, "SELECT to_regclass('public.payment_history_rows') AS table_name");
   return !!result.rows?.[0]?.table_name;
 }
 
@@ -1181,7 +1216,7 @@ async function getPaymentHistorySummaryV73() {
   const exists = await paymentHistoryTableExistsV73(pool);
   if (!exists) return [];
 
-  const countResult = await pool.query("SELECT COUNT(*)::int AS count FROM payment_history_rows");
+  const countResult = await safeBillingPoolQueryV77(pool, "SELECT COUNT(*)::int AS count FROM payment_history_rows");
   if (!Number(countResult.rows?.[0]?.count || 0)) return [];
 
   const sql = [
@@ -1234,7 +1269,7 @@ async function getPaymentHistorySummaryV73() {
     "ORDER BY grouped.total_unpaid DESC, grouped.unpaid_months DESC, grouped.vehicle_no ASC"
   ].join("\n");
 
-  const result = await pool.query(sql);
+  const result = await safeBillingPoolQueryV77(pool, sql);
   return result.rows || [];
 }
 
@@ -1300,7 +1335,7 @@ async function ensurePaymentHistoryReadyV76(): Promise<any> {
     console.warn("[payment-history:v76] ensurePaymentHistoryTablesV61 failed; creating table directly", error);
   }
 
-  await pool.query(`
+  await safeBillingPoolQueryV77(pool, `
     CREATE TABLE IF NOT EXISTS payment_history_rows (
       id SERIAL PRIMARY KEY,
       vehicle_no TEXT,
@@ -1319,18 +1354,18 @@ async function ensurePaymentHistoryReadyV76(): Promise<any> {
     )
   `);
 
-  await pool.query(`ALTER TABLE payment_history_rows ADD COLUMN IF NOT EXISTS account TEXT`);
-  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_history_row ON payment_history_rows(vehicle_no_norm, name, billing_type, billing_month)`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_history_vehicle ON payment_history_rows(vehicle_no_norm)`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_history_name ON payment_history_rows(name)`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_history_month ON payment_history_rows(billing_month)`);
-  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_history_type ON payment_history_rows(billing_type)`);
+  await safeBillingPoolQueryV77(pool, `ALTER TABLE payment_history_rows ADD COLUMN IF NOT EXISTS account TEXT`);
+  await safeBillingPoolQueryV77(pool, `CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_history_row ON payment_history_rows(vehicle_no_norm, name, billing_type, billing_month)`);
+  await safeBillingPoolQueryV77(pool, `CREATE INDEX IF NOT EXISTS idx_payment_history_vehicle ON payment_history_rows(vehicle_no_norm)`);
+  await safeBillingPoolQueryV77(pool, `CREATE INDEX IF NOT EXISTS idx_payment_history_name ON payment_history_rows(name)`);
+  await safeBillingPoolQueryV77(pool, `CREATE INDEX IF NOT EXISTS idx_payment_history_month ON payment_history_rows(billing_month)`);
+  await safeBillingPoolQueryV77(pool, `CREATE INDEX IF NOT EXISTS idx_payment_history_type ON payment_history_rows(billing_type)`);
 
   return pool;
 }
 
 async function paymentHistoryTableExistsV76(pool: any): Promise<boolean> {
-  const result = await pool.query("SELECT to_regclass('public.payment_history_rows') AS table_name");
+  const result = await safeBillingPoolQueryV77(pool, "SELECT to_regclass('public.payment_history_rows') AS table_name");
   return !!result.rows?.[0]?.table_name;
 }
 
@@ -1339,7 +1374,7 @@ async function getPaymentHistorySummaryV76() {
   const exists = await paymentHistoryTableExistsV76(pool);
   if (!exists) return [];
 
-  const countResult = await pool.query("SELECT COUNT(*)::int AS count FROM payment_history_rows");
+  const countResult = await safeBillingPoolQueryV77(pool, "SELECT COUNT(*)::int AS count FROM payment_history_rows");
   if (!Number(countResult.rows?.[0]?.count || 0)) return [];
 
   const sql = [
@@ -1392,7 +1427,7 @@ async function getPaymentHistorySummaryV76() {
     "ORDER BY grouped.total_unpaid DESC, grouped.unpaid_months DESC, grouped.vehicle_no ASC"
   ].join("\n");
 
-  const result = await pool.query(sql);
+  const result = await safeBillingPoolQueryV77(pool, sql);
   return result.rows || [];
 }
 
