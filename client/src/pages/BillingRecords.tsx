@@ -26,10 +26,19 @@ function SummaryCard({
   return (
     <Card className="bg-white border border-slate-200 rounded-xl shadow-sm">
       <CardContent className="p-5">
-{[...Array(6)].map((_, i) => (
-        <div key={i} className="h-12 bg-slate-100 rounded-lg animate-pulse" />
-      ))}
-    </div>
+        <div className="flex items-center gap-4">
+          <div className={`w-10 h-10 rounded-lg ${iconBg} flex items-center justify-center`}>
+            <Icon className={`w-5 h-5 ${iconColor}`} />
+          </div>
+          <div>
+            <p className="text-xs font-medium text-slate-500">{title}</p>
+            <p className={`text-lg font-bold ${valueColor}`}>
+              {value.toLocaleString()}{unit}
+            </p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -41,7 +50,6 @@ function PaymentArrearsSummaryV66() {
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 mb-5 shadow-sm">
-      <PaymentArrearsSummaryV66 />
       <div className="flex items-center justify-between mb-3">
         <div>
           <div className="font-semibold text-slate-900">납부이력 연동 요약 v66</div>
