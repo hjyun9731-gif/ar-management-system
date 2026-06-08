@@ -1,123 +1,152 @@
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Download, Filter, Building2, AlertCircle, FileSearch } from "lucide-react";
+import { Download, Filter, Building2, AlertCircle, FileSearch, Search } from "lucide-react";
 import { trpc } from "@/lib/trpc";
-
-const REFLECT_STATUS_STYLE: Record<string, string> = {
-  반영완료: "bg-emerald-50 text-emerald-700 border border-emerald-200",
-  미수금있음: "bg-violet-50 text-violet-700 border border-violet-200",
-  확인필요: "bg-red-50 text-red-700 border border-red-200",
-  보류: "bg-slate-100 text-slate-600 border border-slate-200",
-};
 
 const CLOSURE_TYPE_STYLE: Record<string, string> = {
   폐업: "bg-red-50 text-red-700 border border-red-200",
   양도: "bg-blue-50 text-blue-700 border border-blue-200",
   이관: "bg-amber-50 text-amber-700 border border-amber-200",
+  탈퇴: "bg-slate-100 text-slate-600 border border-slate-200",
+  타도: "bg-purple-50 text-purple-700 border border-purple-200",
 };
+
+function money(value: unknown): string {
+  const n = Number(value || 0);
+  if (!Number.isFinite(n) || n === 0) return "-";
+  return n.toLocaleString("ko-KR") + "원";
+}
+
+function formatDate(value: unknown): string {
+  if (!value) return "-";
+  try {
+    return new Date(String(value)).toLocaleDateString("ko-KR");
+  } catch {
+    return String(value);
+  }
+}
 
 function TableSkeleton() {
   return (
-    <div className="space-y-2 py-2">
+    <TableBody>
       {[...Array(6)].map((_, i) => (
-        <div key={i} className="h-12 bg-slate-100 rounded-lg animate-pulse" />
+        <TableRow key={i}>
+          {[...Array(10)].map((__, j) => (
+            <TableCell key={j}>
+              <div className="h-4 w-full max-w-[120px] animate-pulse rounded bg-slate-100" />
+            </TableCell>
+          ))}
+        </TableRow>
       ))}
-    </div>
+    </TableBody>
   );
 }
 
 export default function ClosureEvents() {
-  const [filters, setFilters] = useState({
-    closureType: "all",
-    reflectStatus: "all",
+  const [closureType, setClosureType] = useState("all");
+  const [searchText, setSearchText] = useState("");
+
+  const { data: closures = [], isLoading } = trpc.billing.listClosuresWithArrears.useQuery({
+    closureType: closureType === "all" ? undefined : closureType,
+    search: searchText.trim() || undefined,
   });
 
-  const { data: closures = [], isLoading } = trpc.billing.listClosures.useQuery({
-    closureType: filters.closureType === "all" ? undefined : filters.closureType,
-    reflectStatus: filters.reflectStatus === "all" ? undefined : filters.reflectStatus,
-  });
+  const arrearsCount = (closures as any[]).filter((c) => Number(c.currentArAmount || 0) > 0).length;
+  const totalArrears = (closures as any[]).reduce((sum, c) => sum + Number(c.currentArAmount || 0), 0);
 
-  const handleExportExcel = () => {
-    const headers = ["구분", "관리번호", "지역", "차량번호", "성명", "접수일자", "처리일자", "기존 미수금액", "반영상태"];
-    const rows = closures.map((c: any) => [
-      c.closureType || "", c.managementNo || "", c.region || "",
-      c.vehicleNo || "", c.name || "", c.receiptDate || "",
-      c.processDate || "", c.unpaidAmountAtClosure || 0, c.reflectStatus || "",
+  const handleExport = () => {
+    const headers = ["차량번호", "성명", "지역", "처리구분", "처리일자", "부과항목", "현재미수금", "미납발생개월수", "최근납부일", "부과제외여부", "비고"];
+    const rows = (closures as any[]).map((c) => [
+      c.vehicleNo || "", c.name || "", c.region || "", c.closureType || "",
+      formatDate(c.processDate), c.billingType || "",
+      c.currentArAmount || 0, c.unpaidMonthCount || 0,
+      c.recentPaymentMonth || "", c.excludeStartMonth ? "제외" : "미처리", c.memo || "",
     ]);
-    const csv = [headers, ...rows].map((row: any) => row.map((cell: any) => `"${cell}"`).join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const csv = [headers, ...rows]
+      .map((row) => row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
     link.download = `closure_events_${new Date().toISOString().split("T")[0]}.csv`;
     link.click();
   };
 
-  const pendingCount = closures.filter((c: any) => c.reflectStatus !== "반영완료").length;
-
   return (
-    <div className="p-6 space-y-5 max-w-7xl">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="min-h-screen bg-slate-50 p-5 space-y-5">
+      {/* 헤더 */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-bold text-slate-900">폐업·양도·이관 현황</h1>
-          <p className="text-sm text-slate-500 mt-0.5">폐업/양도/이관 처리 현황 및 미수금 관리</p>
+          <p className="text-sm text-slate-500 mt-0.5">종료 처리 회원 현황 및 잔여 미수금 관리</p>
         </div>
-        <Button onClick={handleExportExcel} variant="outline" size="sm" className="gap-1.5 text-emerald-700 border-emerald-200 hover:bg-emerald-50">
-          <Download className="w-3.5 h-3.5" />
-          엑셀 다운로드
+        <Button onClick={handleExport} variant="outline" size="sm" className="gap-1.5 text-emerald-700 border-emerald-200 hover:bg-emerald-50">
+          <Download className="w-3.5 h-3.5" /> 엑셀 다운로드
         </Button>
       </div>
 
-      {/* Attention notice */}
-      {!isLoading && pendingCount > 0 && (
+      {/* 요약 카드 */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+          <div className="text-xs text-slate-500 font-medium">전체 건수</div>
+          <div className="text-2xl font-bold text-slate-900 mt-1">{(closures as any[]).length.toLocaleString()}건</div>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+          <div className="text-xs text-slate-500 font-medium">미수금 있음</div>
+          <div className="text-2xl font-bold text-red-600 mt-1">{arrearsCount.toLocaleString()}명</div>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+          <div className="text-xs text-slate-500 font-medium">미수금 합계</div>
+          <div className="text-2xl font-bold text-red-600 mt-1">{totalArrears > 0 ? totalArrears.toLocaleString() + "원" : "-"}</div>
+        </div>
+      </div>
+
+      {/* 미완료 알림 */}
+      {!isLoading && arrearsCount > 0 && (
         <div className="flex items-center gap-3 bg-orange-50 border border-orange-200 rounded-xl px-4 py-3">
           <AlertCircle className="w-4 h-4 text-orange-600 flex-shrink-0" />
           <p className="text-sm text-orange-800">
-            반영 미완료 항목이 <strong>{pendingCount}건</strong> 있습니다. 처리 현황을 확인하세요.
+            미수금 미처리 항목이 <strong>{arrearsCount}건</strong> 있습니다. 확인 후 처리하세요.
           </p>
         </div>
       )}
 
-      {/* Filter Card */}
-      <Card className="bg-white border border-slate-200 rounded-xl shadow-sm">
-        <CardHeader className="pb-3 pt-4 px-5 border-b border-slate-100">
+      {/* 검색/필터 */}
+      <Card className="bg-white border border-slate-200 shadow-sm">
+        <CardHeader className="pb-2 pt-4 px-5 border-b border-slate-100">
           <CardTitle className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-            <Filter className="w-4 h-4 text-slate-400" />
-            필터
+            <Filter className="w-4 h-4 text-slate-400" /> 검색 및 필터
           </CardTitle>
         </CardHeader>
         <CardContent className="px-5 py-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-medium text-slate-600 block mb-1.5">구분</label>
-              <Select value={filters.closureType} onValueChange={(v) => setFilters({ ...filters, closureType: v })}>
-                <SelectTrigger className="h-9 text-sm">
-                  <SelectValue placeholder="전체" />
-                </SelectTrigger>
+              <label className="text-xs font-medium text-slate-500 block mb-1.5">차량번호 / 성명</label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <Input
+                  value={searchText}
+                  onChange={(e) => setSearchText(e.target.value)}
+                  placeholder="검색..."
+                  className="pl-9 h-9 text-sm"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-500 block mb-1.5">처리구분</label>
+              <Select value={closureType} onValueChange={setClosureType}>
+                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">전체</SelectItem>
                   <SelectItem value="폐업">폐업</SelectItem>
                   <SelectItem value="양도">양도</SelectItem>
                   <SelectItem value="이관">이관</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <label className="text-xs font-medium text-slate-600 block mb-1.5">반영상태</label>
-              <Select value={filters.reflectStatus} onValueChange={(v) => setFilters({ ...filters, reflectStatus: v })}>
-                <SelectTrigger className="h-9 text-sm">
-                  <SelectValue placeholder="전체" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">전체</SelectItem>
-                  <SelectItem value="반영완료">반영완료</SelectItem>
-                  <SelectItem value="미수금있음">미수금있음</SelectItem>
-                  <SelectItem value="확인필요">확인필요</SelectItem>
-                  <SelectItem value="보류">보류</SelectItem>
+                  <SelectItem value="탈퇴">탈퇴</SelectItem>
+                  <SelectItem value="타도">타도</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -125,88 +154,97 @@ export default function ClosureEvents() {
         </CardContent>
       </Card>
 
-      {/* Table Card */}
-      <Card className="bg-white border border-slate-200 rounded-xl shadow-sm">
+      {/* 테이블 */}
+      <Card className="bg-white border border-slate-200 shadow-sm">
         <CardHeader className="pb-3 pt-4 px-5 border-b border-slate-100">
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-              <Building2 className="w-4 h-4 text-slate-400" />
-              폐업 현황 목록
+              <Building2 className="w-4 h-4 text-slate-400" /> 폐업·양도·이관 목록
             </CardTitle>
             {!isLoading && (
               <span className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-full px-2.5 py-1 font-medium">
-                {closures.length.toLocaleString()}건
+                {(closures as any[]).length.toLocaleString()}건
               </span>
             )}
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          {isLoading ? (
-            <div className="px-5 py-3">
-              <TableSkeleton />
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-slate-50 hover:bg-slate-50 border-b border-slate-100">
-                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide pl-5">구분</TableHead>
-                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">차량번호</TableHead>
-                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">성명</TableHead>
-                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">처리일자</TableHead>
-                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">기존 미수금액</TableHead>
-                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide">제외시작월</TableHead>
-                    <TableHead className="text-xs font-semibold text-slate-500 uppercase tracking-wide pr-5">반영상태</TableHead>
-                  </TableRow>
-                </TableHeader>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-slate-50 hover:bg-slate-50">
+                  <TableHead className="text-xs font-semibold text-slate-500 pl-4">차량번호</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-500">성명</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-500">지역</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-500">처리구분</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-500">처리일자</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-500">부과항목</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-500 text-right">현재미수금</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-500 text-right">미납개월수</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-500">최근납부일</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-500">부과제외여부</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-500">비고</TableHead>
+                </TableRow>
+              </TableHeader>
+              {isLoading ? <TableSkeleton /> : (
                 <TableBody>
-                  {closures.length === 0 ? (
+                  {(closures as any[]).length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="py-16 text-center">
+                      <TableCell colSpan={11} className="py-16 text-center">
                         <FileSearch className="w-10 h-10 text-slate-200 mx-auto mb-3" />
                         <p className="text-sm font-medium text-slate-400">데이터가 없습니다</p>
                         <p className="text-xs text-slate-300 mt-1">필터 조건을 변경해 보세요</p>
                       </TableCell>
                     </TableRow>
-                  ) : (
-                    closures.map((closure: any) => (
-                      <TableRow key={closure.id} className="hover:bg-slate-50 border-b border-slate-50">
-                        <TableCell className="pl-5 py-3">
-                          <span className={`inline-flex items-center text-xs font-medium rounded-full px-2 py-0.5 ${CLOSURE_TYPE_STYLE[closure.closureType] ?? "bg-slate-100 text-slate-600"}`}>
-                            {closure.closureType}
+                  ) : (closures as any[]).map((closure: any) => {
+                    const hasArrears = Number(closure.currentArAmount || 0) > 0;
+                    return (
+                      <TableRow key={closure.id} className={`border-b border-slate-50 hover:bg-slate-50 ${hasArrears ? "bg-red-50/20" : ""}`}>
+                        <TableCell className="pl-4 py-2.5 font-mono font-semibold text-slate-900 text-sm">{closure.vehicleNo || "-"}</TableCell>
+                        <TableCell className="py-2.5 text-sm text-slate-800 font-medium">{closure.name || "-"}</TableCell>
+                        <TableCell className="py-2.5 text-sm text-slate-600">{closure.region || "-"}</TableCell>
+                        <TableCell className="py-2.5">
+                          <span className={`inline-flex items-center text-xs font-medium rounded-full px-2 py-0.5 border ${CLOSURE_TYPE_STYLE[closure.closureType] ?? "bg-slate-100 text-slate-600 border-slate-200"}`}>
+                            {closure.closureType || "-"}
                           </span>
                         </TableCell>
-                        <TableCell className="text-sm font-semibold text-slate-900 py-3">{closure.vehicleNo}</TableCell>
-                        <TableCell className="text-sm text-slate-800 py-3">{closure.name}</TableCell>
-                        <TableCell className="text-sm text-slate-600 py-3 font-mono">
-                          {new Date(closure.processDate).toLocaleDateString("ko-KR")}
-                        </TableCell>
-                        <TableCell className="py-3">
-                          <div className="text-sm font-semibold text-slate-900">
-                            {(closure.unpaidAmountAtClosure || 0).toLocaleString()}원
-                          </div>
-                          {closure.unpaidAmountAtClosure > 0 && (
-                            <div className="flex items-center gap-1 text-xs text-red-600 mt-0.5">
-                              <AlertCircle className="w-3 h-3" />
-                              미수금 있음
+                        <TableCell className="py-2.5 text-sm text-slate-600 font-mono">{formatDate(closure.processDate)}</TableCell>
+                        <TableCell className="py-2.5 text-sm text-slate-600">{closure.billingType || "-"}</TableCell>
+                        <TableCell className="py-2.5 text-right">
+                          {hasArrears ? (
+                            <div className="flex items-center justify-end gap-1">
+                              <AlertCircle className="w-3 h-3 text-red-500 flex-shrink-0" />
+                              <span className="font-bold text-red-600 text-sm">{Number(closure.currentArAmount).toLocaleString()}원</span>
                             </div>
+                          ) : (
+                            <span className="text-slate-300 text-sm">-</span>
                           )}
                         </TableCell>
-                        <TableCell className="text-sm py-3 font-mono text-slate-700">
-                          {closure.excludeStartMonth || <span className="text-slate-300">-</span>}
+                        <TableCell className="py-2.5 text-sm text-right">
+                          {Number(closure.unpaidMonthCount || 0) > 0 ? (
+                            <span className="font-semibold text-red-600">{closure.unpaidMonthCount}개월</span>
+                          ) : (
+                            <span className="text-slate-300">-</span>
+                          )}
                         </TableCell>
-                        <TableCell className="py-3 pr-5">
-                          <span className={`inline-flex items-center text-xs font-medium rounded-full px-2 py-0.5 ${REFLECT_STATUS_STYLE[closure.reflectStatus] ?? "bg-slate-100 text-slate-600"}`}>
-                            {closure.reflectStatus}
-                          </span>
+                        <TableCell className="py-2.5 text-sm text-slate-500 font-mono">{closure.recentPaymentMonth || "-"}</TableCell>
+                        <TableCell className="py-2.5">
+                          {closure.excludeStartMonth ? (
+                            <span className="inline-flex items-center text-xs font-medium rounded-full px-2 py-0.5 bg-slate-100 text-slate-600 border border-slate-200">
+                              제외 ({closure.excludeStartMonth})
+                            </span>
+                          ) : (
+                            <span className="text-xs text-amber-600 font-medium">미처리</span>
+                          )}
                         </TableCell>
+                        <TableCell className="py-2.5 text-xs text-slate-400 max-w-[120px] truncate">{closure.memo || "-"}</TableCell>
                       </TableRow>
-                    ))
-                  )}
+                    );
+                  })}
                 </TableBody>
-              </Table>
-            </div>
-          )}
+              )}
+            </Table>
+          </div>
         </CardContent>
       </Card>
     </div>

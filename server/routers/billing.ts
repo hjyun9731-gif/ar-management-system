@@ -3183,6 +3183,116 @@ export const billingRouter = router({
     .mutation(async ({ input }) => {
       return await insertPaymentHistorySummaryRowsV79(input);
     }),
+
+  // V83: 다음 달 부과 대상 + 미수금 연동
+  listCandidatesWithArrears: publicProcedure
+    .input(z.object({
+      region: z.string().optional(),
+      memberType: z.string().optional(),
+      search: z.string().optional(),
+    }))
+    .query(async ({ input }) => {
+      const pool = getPaymentHistoryPoolV79();
+      // 폐업/양도/이관 제외 후보 목록 + 미수금 LEFT JOIN
+      const whereParts = ["bc.status NOT IN ('제외')"];
+      const params: any[] = [];
+      if (input.region) {
+        params.push(input.region);
+        whereParts.push(`bc.region = $${params.length}`);
+      }
+      const sql = `
+        SELECT
+          bc.id,
+          bc.vehicle_no AS "vehicleNo",
+          bc.name,
+          bc.region,
+          bc.member_type AS "memberType",
+          bc.billing_type AS "billingType",
+          bc.billing_start_month AS "billingStartMonth",
+          bc.status,
+          bc.memo,
+          COALESCE(phs.billing_month_count, 0)::int AS "billingMonthCount",
+          COALESCE(phs.unpaid_month_count, 0)::int AS "unpaidMonthCount",
+          COALESCE(phs.current_ar_amount, 0)::int AS "currentArAmount",
+          phs.recent_payment_month AS "recentPaymentMonth"
+        FROM billing_candidates bc
+        LEFT JOIN payment_history_summary phs
+          ON (
+            TRIM(COALESCE(bc.vehicle_no,'')) = TRIM(COALESCE(phs.vehicle_no,''))
+            OR (TRIM(COALESCE(bc.vehicle_no,'')) = '' AND LOWER(TRIM(bc.name)) = LOWER(TRIM(phs.name)))
+          )
+          AND LOWER(TRIM(COALESCE(bc.billing_type,''))) = LOWER(TRIM(COALESCE(phs.billing_item,'')))
+        WHERE ${whereParts.join(" AND ")}
+        ORDER BY COALESCE(phs.current_ar_amount,0) DESC, bc.region, bc.vehicle_no
+        LIMIT 5000
+      `;
+      const result = await pool.query(sql, params.length ? params : undefined);
+      let rows: any[] = result?.rows || [];
+      if (input.memberType) rows = rows.filter((r: any) => r.memberType === input.memberType);
+      if (input.search) {
+        const q = input.search.toLowerCase();
+        rows = rows.filter((r: any) =>
+          String(r.vehicleNo || "").toLowerCase().includes(q) ||
+          String(r.name || "").toLowerCase().includes(q)
+        );
+      }
+      return rows;
+    }),
+
+  // V83: 폐업/양도/이관 현황 + 미수금 연동
+  listClosuresWithArrears: publicProcedure
+    .input(z.object({
+      closureType: z.string().optional(),
+      search: z.string().optional(),
+    }))
+    .query(async ({ input }) => {
+      const pool = getPaymentHistoryPoolV79();
+      const ceParams: any[] = [];
+      const ceWhere: string[] = [];
+      if (input.closureType) {
+        ceParams.push(input.closureType);
+        ceWhere.push(`ce.closure_type = $${ceParams.length}`);
+      }
+      const ceWhereClause = ceWhere.length ? `WHERE ${ceWhere.join(" AND ")}` : "";
+      const sql = `
+        SELECT
+          ce.id,
+          ce.vehicle_no AS "vehicleNo",
+          ce.name,
+          ce.region,
+          ce.closure_type AS "closureType",
+          ce.process_date AS "processDate",
+          ce.billing_type AS "billingType",
+          ce.exclude_start_month AS "excludeStartMonth",
+          ce.reflect_status AS "reflectStatus",
+          ce.unpaid_amount_at_closure AS "unpaidAmountAtClosure",
+          ce.memo,
+          COALESCE(phs.billing_month_count, 0)::int AS "billingMonthCount",
+          COALESCE(phs.unpaid_month_count, 0)::int AS "unpaidMonthCount",
+          COALESCE(phs.current_ar_amount, ce.unpaid_amount_at_closure, 0)::int AS "currentArAmount",
+          phs.recent_payment_month AS "recentPaymentMonth"
+        FROM closure_events ce
+        LEFT JOIN payment_history_summary phs
+          ON (
+            TRIM(COALESCE(ce.vehicle_no,'')) = TRIM(COALESCE(phs.vehicle_no,''))
+            OR (TRIM(COALESCE(ce.vehicle_no,'')) = '' AND LOWER(TRIM(ce.name)) = LOWER(TRIM(phs.name)))
+          )
+          AND LOWER(TRIM(COALESCE(ce.billing_type,''))) = LOWER(TRIM(COALESCE(phs.billing_item,'')))
+        ${ceWhereClause}
+        ORDER BY COALESCE(phs.current_ar_amount,0) DESC, ce.process_date DESC
+        LIMIT 5000
+      `;
+      const result = await pool.query(sql, ceParams.length ? ceParams : undefined);
+      let rows: any[] = result?.rows || [];
+      if (input.search) {
+        const q = input.search.toLowerCase();
+        rows = rows.filter((r: any) =>
+          String(r.vehicleNo || "").toLowerCase().includes(q) ||
+          String(r.name || "").toLowerCase().includes(q)
+        );
+      }
+      return rows;
+    }),
 });
 
 
