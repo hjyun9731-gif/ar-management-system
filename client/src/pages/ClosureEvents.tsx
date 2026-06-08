@@ -59,12 +59,12 @@ export default function ClosureEvents() {
   const totalArrears = (closures as any[]).reduce((sum, c) => sum + Number(c.currentArAmount || 0), 0);
 
   const handleExport = () => {
-    const headers = ["차량번호", "성명", "지역", "처리구분", "처리일자", "부과항목", "현재미수금", "미납발생개월수", "최근납부일", "부과제외여부", "비고"];
+    const headers = ["처리구분", "처리일자", "차량번호", "성명", "지역", "미수금", "미납발생개월수", "최근납부일", "비고"];
     const rows = (closures as any[]).map((c) => [
-      c.vehicleNo || "", c.name || "", c.region || "", c.closureType || "",
-      formatDate(c.processDate), c.billingType || "",
+      c.closureType || "", formatDate(c.processDate),
+      c.vehicleNo || "", c.name || "", c.region || "",
       c.currentArAmount || 0, c.unpaidMonthCount || 0,
-      c.recentPaymentMonth || "", c.excludeStartMonth ? "제외" : "미처리", c.memo || "",
+      c.recentPaymentMonth || "", c.memo || "",
     ]);
     const csv = [headers, ...rows]
       .map((row) => row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(","))
@@ -173,16 +173,14 @@ export default function ClosureEvents() {
             <Table>
               <TableHeader>
                 <TableRow className="bg-slate-50 hover:bg-slate-50">
-                  <TableHead className="text-xs font-semibold text-slate-500 pl-4">차량번호</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-500 pl-4">처리구분</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-500">처리일자</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-500">차량번호</TableHead>
                   <TableHead className="text-xs font-semibold text-slate-500">성명</TableHead>
                   <TableHead className="text-xs font-semibold text-slate-500">지역</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-500">처리구분</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-500">처리일자</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-500">부과항목</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-500 text-right">현재미수금</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-500 text-right">미납개월수</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-500 text-right">미수금</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-500 text-right">미납발생개월수</TableHead>
                   <TableHead className="text-xs font-semibold text-slate-500">최근납부일</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-500">부과제외여부</TableHead>
                   <TableHead className="text-xs font-semibold text-slate-500">비고</TableHead>
                 </TableRow>
               </TableHeader>
@@ -190,34 +188,34 @@ export default function ClosureEvents() {
                 <TableBody>
                   {(closures as any[]).length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={11} className="py-16 text-center">
+                      <TableCell colSpan={9} className="py-16 text-center">
                         <FileSearch className="w-10 h-10 text-slate-200 mx-auto mb-3" />
                         <p className="text-sm font-medium text-slate-400">데이터가 없습니다</p>
                         <p className="text-xs text-slate-300 mt-1">필터 조건을 변경해 보세요</p>
                       </TableCell>
                     </TableRow>
                   ) : (closures as any[]).map((closure: any) => {
-                    const hasArrears = Number(closure.currentArAmount || 0) > 0;
+                    const arAmount = Number(closure.currentArAmount || 0);
+                    const hasArrears = arAmount > 0;
                     return (
                       <TableRow key={closure.id} className={`border-b border-slate-50 hover:bg-slate-50 ${hasArrears ? "bg-red-50/20" : ""}`}>
-                        <TableCell className="pl-4 py-2.5 font-mono font-semibold text-slate-900 text-sm">{closure.vehicleNo || "-"}</TableCell>
-                        <TableCell className="py-2.5 text-sm text-slate-800 font-medium">{closure.name || "-"}</TableCell>
-                        <TableCell className="py-2.5 text-sm text-slate-600">{closure.region || "-"}</TableCell>
-                        <TableCell className="py-2.5">
+                        <TableCell className="pl-4 py-2.5">
                           <span className={`inline-flex items-center text-xs font-medium rounded-full px-2 py-0.5 border ${CLOSURE_TYPE_STYLE[closure.closureType] ?? "bg-slate-100 text-slate-600 border-slate-200"}`}>
                             {closure.closureType || "-"}
                           </span>
                         </TableCell>
                         <TableCell className="py-2.5 text-sm text-slate-600 font-mono">{formatDate(closure.processDate)}</TableCell>
-                        <TableCell className="py-2.5 text-sm text-slate-600">{closure.billingType || "-"}</TableCell>
+                        <TableCell className="py-2.5 font-mono font-semibold text-slate-900 text-sm">{closure.vehicleNo || "-"}</TableCell>
+                        <TableCell className="py-2.5 text-sm text-slate-800 font-medium">{closure.name || "-"}</TableCell>
+                        <TableCell className="py-2.5 text-sm text-slate-600">{closure.region || "-"}</TableCell>
                         <TableCell className="py-2.5 text-right">
                           {hasArrears ? (
                             <div className="flex items-center justify-end gap-1">
                               <AlertCircle className="w-3 h-3 text-red-500 flex-shrink-0" />
-                              <span className="font-bold text-red-600 text-sm">{Number(closure.currentArAmount).toLocaleString()}원</span>
+                              <span className="font-bold text-red-600 text-sm">{arAmount.toLocaleString()}원</span>
                             </div>
                           ) : (
-                            <span className="text-slate-300 text-sm">-</span>
+                            <span className="text-slate-400 text-sm">미수 없음</span>
                           )}
                         </TableCell>
                         <TableCell className="py-2.5 text-sm text-right">
@@ -228,16 +226,7 @@ export default function ClosureEvents() {
                           )}
                         </TableCell>
                         <TableCell className="py-2.5 text-sm text-slate-500 font-mono">{closure.recentPaymentMonth || "-"}</TableCell>
-                        <TableCell className="py-2.5">
-                          {closure.excludeStartMonth ? (
-                            <span className="inline-flex items-center text-xs font-medium rounded-full px-2 py-0.5 bg-slate-100 text-slate-600 border border-slate-200">
-                              제외 ({closure.excludeStartMonth})
-                            </span>
-                          ) : (
-                            <span className="text-xs text-amber-600 font-medium">미처리</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="py-2.5 text-xs text-slate-400 max-w-[120px] truncate">{closure.memo || "-"}</TableCell>
+                        <TableCell className="py-2.5 text-xs text-slate-400 max-w-[140px] truncate">{closure.memo || "-"}</TableCell>
                       </TableRow>
                     );
                   })}

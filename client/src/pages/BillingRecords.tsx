@@ -12,7 +12,7 @@ type ArrearsRow = {
   region?: string;
   billingType?: string;
   billingStartMonth?: string;
-  arrearsStartMonth?: string | null;
+  billingMonthCount?: number;
   arrearsMonths?: number;
   arrearsAmount?: number;
   recentPaymentMonth?: string | null;
@@ -126,8 +126,8 @@ export default function BillingRecords() {
                   <TableHead className="text-xs font-semibold text-slate-500">지역</TableHead>
                   <TableHead className="text-xs font-semibold text-slate-500">부과항목</TableHead>
                   <TableHead className="text-xs font-semibold text-slate-500">부과시작월</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-500">미납시작월</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-500 text-right">미납개월수</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-500 text-right">부과개월수</TableHead>
+                  <TableHead className="text-xs font-semibold text-slate-500 text-right">미납발생개월수</TableHead>
                   <TableHead className="text-xs font-semibold text-slate-500 text-right">미수금</TableHead>
                   <TableHead className="text-xs font-semibold text-slate-500">최근납부일</TableHead>
                 </TableRow>
@@ -159,7 +159,13 @@ export default function BillingRecords() {
                           </Badge>
                         </TableCell>
                         <TableCell className="py-2.5 text-sm text-slate-600 font-mono">{row.billingStartMonth || "-"}</TableCell>
-                        <TableCell className="py-2.5 text-sm text-slate-500 font-mono">{row.arrearsStartMonth || "-"}</TableCell>
+                        <TableCell className="py-2.5 text-sm text-right text-slate-600">
+                          {Number(row.billingMonthCount || 0) > 0 ? (
+                            <span>{Number(row.billingMonthCount).toLocaleString()}개월</span>
+                          ) : (
+                            <span className="text-slate-300">-</span>
+                          )}
+                        </TableCell>
                         <TableCell className="py-2.5 text-sm text-right">
                           {Number(row.arrearsMonths || 0) > 0 ? (
                             <span className="font-semibold text-red-600">{Number(row.arrearsMonths).toLocaleString()}개월</span>

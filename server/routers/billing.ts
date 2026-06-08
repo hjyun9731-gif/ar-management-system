@@ -2432,11 +2432,10 @@ async function getPaymentHistoryCurrentArrearsV79() {
     region: row.region,
     billingType: row.billingType,
     billingStartMonth: row.billingStartMonth,
-    arrearsStartMonth: row.totalUnpaid > 0 ? row.latestMonth : null,
+    billingMonthCount: row.historyCount || 0,
     arrearsMonths: row.unpaidMonths || 0,
     arrearsAmount: row.totalUnpaid || 0,
     recentPaymentMonth: row.lastPaidMonth || null,
-    latestMonth: row.latestMonth || null,
   }));
 }
 
@@ -3211,22 +3210,22 @@ export const billingRouter = router({
           bc.billing_start_month AS "billingStartMonth",
           bc.status,
           bc.memo,
-          COALESCE(phs.billing_month_count, 0)::int AS "billingMonthCount",
-          COALESCE(phs.unpaid_month_count, 0)::int AS "unpaidMonthCount",
-          COALESCE(phs.current_ar_amount, 0)::int AS "currentArAmount",
+          COALESCE(phs.history_count, 0)::int AS "billingMonthCount",
+          COALESCE(phs.balance_months, 0)::int AS "unpaidMonthCount",
+          COALESCE(phs.current_balance_amount, 0)::int AS "currentArAmount",
           phs.recent_payment_month AS "recentPaymentMonth"
         FROM billing_candidates bc
-        LEFT JOIN payment_history_summary phs
+        LEFT JOIN payment_history_summary_rows phs
           ON (
             TRIM(COALESCE(bc.vehicle_no,'')) = TRIM(COALESCE(phs.vehicle_no,''))
             OR (TRIM(COALESCE(bc.vehicle_no,'')) = '' AND LOWER(TRIM(bc.name)) = LOWER(TRIM(phs.name)))
           )
-          AND LOWER(TRIM(COALESCE(bc.billing_type,''))) = LOWER(TRIM(COALESCE(phs.billing_item,'')))
+          AND LOWER(TRIM(COALESCE(bc.billing_type,''))) = LOWER(TRIM(COALESCE(phs.account,'')))
         WHERE ${whereParts.join(" AND ")}
-        ORDER BY COALESCE(phs.current_ar_amount,0) DESC, bc.region, bc.vehicle_no
+        ORDER BY COALESCE(phs.current_balance_amount,0) DESC, bc.region, bc.vehicle_no
         LIMIT 5000
       `;
-      const result = await pool.query(sql, params.length ? params : undefined);
+      const result = await pool.query(sql, params.length ? params : []);
       let rows: any[] = result?.rows || [];
       if (input.memberType) rows = rows.filter((r: any) => r.memberType === input.memberType);
       if (input.search) {
@@ -3267,22 +3266,21 @@ export const billingRouter = router({
           ce.reflect_status AS "reflectStatus",
           ce.unpaid_amount_at_closure AS "unpaidAmountAtClosure",
           ce.memo,
-          COALESCE(phs.billing_month_count, 0)::int AS "billingMonthCount",
-          COALESCE(phs.unpaid_month_count, 0)::int AS "unpaidMonthCount",
-          COALESCE(phs.current_ar_amount, ce.unpaid_amount_at_closure, 0)::int AS "currentArAmount",
+          COALESCE(phs.history_count, 0)::int AS "billingMonthCount",
+          COALESCE(phs.balance_months, 0)::int AS "unpaidMonthCount",
+          COALESCE(phs.current_balance_amount, ce.unpaid_amount_at_closure, 0)::int AS "currentArAmount",
           phs.recent_payment_month AS "recentPaymentMonth"
         FROM closure_events ce
-        LEFT JOIN payment_history_summary phs
+        LEFT JOIN payment_history_summary_rows phs
           ON (
             TRIM(COALESCE(ce.vehicle_no,'')) = TRIM(COALESCE(phs.vehicle_no,''))
             OR (TRIM(COALESCE(ce.vehicle_no,'')) = '' AND LOWER(TRIM(ce.name)) = LOWER(TRIM(phs.name)))
           )
-          AND LOWER(TRIM(COALESCE(ce.billing_type,''))) = LOWER(TRIM(COALESCE(phs.billing_item,'')))
         ${ceWhereClause}
-        ORDER BY COALESCE(phs.current_ar_amount,0) DESC, ce.process_date DESC
+        ORDER BY COALESCE(phs.current_balance_amount,0) DESC, ce.process_date DESC
         LIMIT 5000
       `;
-      const result = await pool.query(sql, ceParams.length ? ceParams : undefined);
+      const result = await pool.query(sql, ceParams.length ? ceParams : []);
       let rows: any[] = result?.rows || [];
       if (input.search) {
         const q = input.search.toLowerCase();
