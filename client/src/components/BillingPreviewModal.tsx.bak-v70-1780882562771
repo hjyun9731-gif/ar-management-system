@@ -7,47 +7,6 @@ import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { useState } from "react";
 
-
-/* v70 helper: 부과항목별 금액 계산 강제 복구 */
-function getBillingAmountByTypeV70(itemOrType: any): number {
-  const raw = typeof itemOrType === "string"
-    ? itemOrType
-    : String(
-        itemOrType?.billingType ??
-        itemOrType?.type ??
-        itemOrType?.billingItem ??
-        itemOrType?.item ??
-        itemOrType?.feeType ??
-        itemOrType?.category ??
-        ""
-      );
-
-  if (raw.includes("관리비")) return 5000;
-  if (raw.includes("협회비")) return 10000;
-
-  const direct = Number(
-    itemOrType?.amount ??
-    itemOrType?.billingAmount ??
-    itemOrType?.expectedAmount ??
-    itemOrType?.unitAmount ??
-    0
-  );
-
-  return Number.isFinite(direct) ? direct : 0;
-}
-
-function getBillingTotalAmountV70(items: any[] = []): number {
-  return (items || []).reduce((sum, item) => sum + getBillingAmountByTypeV70(item), 0);
-}
-
-function getBillingAmountLabelV70(items: any[] = []): string {
-  const amounts = Array.from(new Set((items || []).map(getBillingAmountByTypeV70).filter(Boolean)));
-  if (amounts.length === 1) return amounts[0].toLocaleString("ko-KR");
-  if (amounts.length > 1) return "혼합";
-  return "0";
-}
-/* v70 helper end */
-
 interface BillingPreviewModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -77,7 +36,7 @@ export function BillingPreviewModal({ open, onOpenChange, month }: BillingPrevie
     runBatchMutation.mutate({ month });
   };
 
-  const totalAmount = getBillingTotalAmountV70(candidates); // 협회비 10,000 + 관리비 5,000
+  const totalAmount = getBillingTotalAmountV40(candidates); // 협회비 10,000 + 관리비 5,000
   const activeMembers = candidates.filter((c: any) => c.status !== "제외");
 
   return (

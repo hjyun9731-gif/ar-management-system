@@ -7,47 +7,6 @@ import { Eye, CalendarCheck, Users, TrendingUp } from "lucide-react";
 import { BillingPreviewModal } from "@/components/BillingPreviewModal";
 import { trpc } from "@/lib/trpc";
 
-
-/* v70 helper: 부과항목별 금액 계산 강제 복구 */
-function getBillingAmountByTypeV70(itemOrType: any): number {
-  const raw = typeof itemOrType === "string"
-    ? itemOrType
-    : String(
-        itemOrType?.billingType ??
-        itemOrType?.type ??
-        itemOrType?.billingItem ??
-        itemOrType?.item ??
-        itemOrType?.feeType ??
-        itemOrType?.category ??
-        ""
-      );
-
-  if (raw.includes("관리비")) return 5000;
-  if (raw.includes("협회비")) return 10000;
-
-  const direct = Number(
-    itemOrType?.amount ??
-    itemOrType?.billingAmount ??
-    itemOrType?.expectedAmount ??
-    itemOrType?.unitAmount ??
-    0
-  );
-
-  return Number.isFinite(direct) ? direct : 0;
-}
-
-function getBillingTotalAmountV70(items: any[] = []): number {
-  return (items || []).reduce((sum, item) => sum + getBillingAmountByTypeV70(item), 0);
-}
-
-function getBillingAmountLabelV70(items: any[] = []): string {
-  const amounts = Array.from(new Set((items || []).map(getBillingAmountByTypeV70).filter(Boolean)));
-  if (amounts.length === 1) return amounts[0].toLocaleString("ko-KR");
-  if (amounts.length > 1) return "혼합";
-  return "0";
-}
-/* v70 helper end */
-
 function MonthSummaryCard({
   month,
   label,
@@ -201,7 +160,7 @@ export default function BillingApproval() {
             month={currentMonth}
             label="이번 달 부과 예정"
             count={thisMonthCandidates.length}
-            estimatedAmount={getBillingTotalAmountV70(thisMonthCandidates)}
+            estimatedAmount={getBillingTotalAmountV40(thisMonthCandidates)}
             variant="primary"
             onAction={() => handlePreview(currentMonth)}
             actionLabel="부과 반영"
@@ -210,7 +169,7 @@ export default function BillingApproval() {
             month={nextMonth}
             label="다음 달 부과 예정"
             count={nextMonthCandidates.length}
-            estimatedAmount={getBillingTotalAmountV70(nextMonthCandidates)}
+            estimatedAmount={getBillingTotalAmountV40(nextMonthCandidates)}
             variant="secondary"
             onAction={() => handlePreview(nextMonth)}
             actionLabel="미리보기"
