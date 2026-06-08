@@ -189,6 +189,26 @@ function monthlyFromCsvRow(row: Record<string, string>, sourceFile: string, inde
 function parseCurrent2026Workbook(workbook: XLSX.WorkBook, sourceFile: string): SummaryRow[] {
   const results: SummaryRow[] = [];
 
+  const cleanHeader = (value: unknown) => String(value || "").replace(/\s+/g, "").trim();
+
+  const headerTextAround = (matrix: any[][], headerRow: number, col: number): string => {
+    const parts: string[] = [];
+    for (let r = Math.max(0, headerRow - 4); r <= Math.min(matrix.length - 1, headerRow + 3); r++) {
+      for (let c = Math.max(0, col - 2); c <= Math.min((matrix[r] || []).length - 1, col + 1); c++) {
+        const text = cleanHeader((matrix[r] || [])[c]);
+        if (text) parts.push(text);
+      }
+    }
+    return parts.join("|");
+  };
+
+  const monthFromText = (text: string): number => {
+    const m = text.match(/(\d{1,2})월/);
+    if (!m) return 0;
+    const n = Number(m[1]);
+    return n >= 1 && n <= 12 ? n : 0;
+  };
+
   for (const sheetName of workbook.SheetNames) {
     const sheet = workbook.Sheets[sheetName];
     const matrix = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, raw: true, defval: "" });
@@ -197,61 +217,113 @@ function parseCurrent2026Workbook(workbook: XLSX.WorkBook, sourceFile: string): 
     let headerRow = -1;
     let headers: string[] = [];
 
-    for (let r = 0; r < Math.min(30, matrix.length); r++) {
-      const h = (matrix[r] || []).map((x) => String(x || "").trim());
-      const normalized = h.map((x) => x.replace(/\s+/g, ""));
-      const hasVehicle = normalized.some((x) => x.includes("차량번호"));
-      const hasName = normalized.some((x) => x === "성명" || x === "이름");
-      const hasUnpaid = normalized.some((x) => /\d{1,2}월미수금/.test(x));
-      if (hasVehicle && hasName && hasUnpaid) {
+    for (let r = 0; r < Math.min(80, matrix.length); r++) {
+      const rowHeaders = (matrix[r] || []).map(cleanHeader);
+      const hasVehicle = rowHeaders.some((h) => h.includes("차량번호") || h === "차량");
+      const hasName = rowHeaders.some((h) => h === "성명" || h === "이름" || h.includes("성명"));
+      const hasAccount = rowHeaders.some((h) => h === "계정" || h === "구분");
+      const hasUnpaid = rowHeaders.some((h) => h.includes("미수"));
+
+      if ((hasVehicle && hasName) || (hasAccount && hasVehicle) || hasUnpaid) {
+        // 미수금 컬럼이 주변행에 있을 수 있으므로 후보로 잡고, 차량/성명은 아래에서 보정
         headerRow = r;
-        headers = h;
-        break;
+        headers = rowHeaders;
+        if (hasVehicle && hasName) break;
       }
     }
 
     if (headerRow < 0) continue;
 
-    const hnorm = headers.map((h) => h.replace(/\s+/g, ""));
-    const findCol = (patterns: RegExp[]) => hnorm.findIndex((h) => patterns.some((p) => p.test(h)));
+    const findCol = (patterns: RegExp[]) => {
+      let idx = headers.findIndex((h) => patterns.some((p) => p.test(h)));
+      if (idx >= 0) return idx;
 
-    const regionIdx = findCol([/^지역$/]);
-    const accountIdx = findCol([/^계정$/, /^구분$/]);
-    const vehicleIdx = findCol([/차량번호/]);
-    const nameIdx = findCol([/^성명$/, /^이름$/]);
-    const noteIdx = findCol([/^비고$/]);
-
-    const monthCols: { month: number; unpaidIdx: number; chargeIdx: number; paidIdx: number; dateIdx: number }[] = [];
-    hnorm.forEach((h, idx) => {
-      const m = h.match(/^(\d{1,2})월미수금$/);
-      if (m) {
-        const month = Number(m[1]);
-        let chargeIdx = -1;
-        let paidIdx = -1;
-        let dateIdx = -1;
-
-        for (let j = Math.max(0, idx - 5); j <= idx; j++) {
-          const hh = hnorm[j] || "";
-          if (chargeIdx < 0 && new RegExp("^" + month + "월.*(부과|회비|금액)$").test(hh)) chargeIdx = j;
-          if (paidIdx < 0 && new RegExp("^" + month + "월.*(납부|입금)$").test(hh)) paidIdx = j;
-          if (dateIdx < 0 && new RegExp("^" + month + "월.*(일자|날짜|납부일|입금일)$").test(hh)) dateIdx = j;
-        }
-
-        if (chargeIdx < 0) chargeIdx = idx - 3;
-        if (paidIdx < 0) paidIdx = idx - 2;
-        if (dateIdx < 0) dateIdx = idx - 1;
-
-        monthCols.push({ month, unpaidIdx: idx, chargeIdx, paidIdx, dateIdx });
+      // 헤더 주변 5줄을 같이 탐색
+      for (let r = Math.max(0, headerRow - 2); r <= Math.min(matrix.length - 1, headerRow + 2); r++) {
+        const row = (matrix[r] || []).map(cleanHeader);
+        idx = row.findIndex((h) => patterns.some((p) => p.test(h)));
+        if (idx >= 0) return idx;
       }
-    });
+      return -1;
+    };
 
-    if (vehicleIdx < 0 || nameIdx < 0 || !monthCols.length) continue;
+    let regionIdx = findCol([/^지역$/]);
+    let accountIdx = findCol([/^계정$/, /^구분$/]);
+    let vehicleIdx = findCol([/차량번호/, /^차량$/]);
+    let nameIdx = findCol([/^성명$/, /^이름$/, /성명/]);
+    let noteIdx = findCol([/^비고$/]);
+
+    // 2026미수금 기존 구조 보정: K=지역, L=계정, M=차량번호, N=성명
+    if (regionIdx < 0) regionIdx = 10;
+    if (accountIdx < 0) accountIdx = 11;
+    if (vehicleIdx < 0) vehicleIdx = 12;
+    if (nameIdx < 0) nameIdx = 13;
+
+    const maxCols = Math.max(...matrix.slice(0, Math.min(matrix.length, headerRow + 5)).map((row) => (row || []).length), 0);
+
+    const unpaidCols: { month: number; unpaidIdx: number; chargeIdx: number; paidIdx: number; dateIdx: number }[] = [];
+
+    for (let c = 0; c < maxCols; c++) {
+      const around = headerTextAround(matrix, headerRow, c);
+      const direct = cleanHeader((matrix[headerRow] || [])[c]);
+      const isUnpaidCol =
+        direct.includes("미수금") ||
+        direct === "미수" ||
+        around.includes("미수금") ||
+        around.includes("미수");
+
+      if (!isUnpaidCol) continue;
+
+      let month = monthFromText(direct) || monthFromText(around);
+
+      // 주변 왼쪽/위쪽에서 월 찾기
+      if (!month) {
+        for (let cc = Math.max(0, c - 5); cc <= c; cc++) {
+          const txt = headerTextAround(matrix, headerRow, cc);
+          month = monthFromText(txt);
+          if (month) break;
+        }
+      }
+
+      // 월을 못 찾아도 오른쪽 순서로 최신값 계산할 수 있으니 임시 월 부여
+      if (!month) month = unpaidCols.length + 1;
+
+      let chargeIdx = -1;
+      let paidIdx = -1;
+      let dateIdx = -1;
+
+      for (let cc = Math.max(0, c - 6); cc <= Math.min(maxCols - 1, c + 1); cc++) {
+        const txt = headerTextAround(matrix, headerRow, cc);
+        if (chargeIdx < 0 && (txt.includes("부과") || txt.includes("회비") || txt.includes("월부과"))) chargeIdx = cc;
+        if (paidIdx < 0 && (txt.includes("납부액") || txt.includes("입금액") || txt.includes("납부"))) paidIdx = cc;
+        if (dateIdx < 0 && (txt.includes("납부일") || txt.includes("입금일") || txt.includes("일자") || txt.includes("날짜"))) dateIdx = cc;
+      }
+
+      if (chargeIdx < 0) chargeIdx = c - 3;
+      if (paidIdx < 0) paidIdx = c - 2;
+      if (dateIdx < 0) dateIdx = c - 1;
+
+      // 같은 미수금 컬럼 중복 방지
+      if (!unpaidCols.some((x) => x.unpaidIdx === c)) {
+        unpaidCols.push({ month, unpaidIdx: c, chargeIdx, paidIdx, dateIdx });
+      }
+    }
+
+    unpaidCols.sort((a, b) => a.unpaidIdx - b.unpaidIdx);
+
+    if (vehicleIdx < 0 || nameIdx < 0 || !unpaidCols.length) {
+      console.warn("[v80] 2026미수금 컬럼 탐지 실패", { sheetName, headerRow, vehicleIdx, nameIdx, unpaidCols: unpaidCols.length });
+      continue;
+    }
 
     for (let r = headerRow + 1; r < matrix.length; r++) {
       const line = matrix[r] || [];
+
       const vehicleNo = normalizeVehicle(line[vehicleIdx]);
       const name = compact(line[nameIdx]);
+
       if (!vehicleNo || !name) continue;
+      if (name.includes("합계") || vehicleNo.includes("합계")) continue;
 
       const account = String(line[accountIdx] || "").trim() || "협회비";
       const region = String(line[regionIdx] || "").trim();
@@ -262,9 +334,13 @@ function parseCurrent2026Workbook(workbook: XLSX.WorkBook, sourceFile: string): 
       let monthlyAmount = account.includes("관리비") ? 5000 : 10000;
       let lastPaidMonth = "";
 
-      for (const mc of monthCols) {
+      for (const mc of unpaidCols) {
         const rawUnpaid = line[mc.unpaidIdx];
-        const hasValue = rawUnpaid !== "" && rawUnpaid !== null && rawUnpaid !== undefined;
+        const hasUnpaidCell =
+          rawUnpaid !== "" &&
+          rawUnpaid !== null &&
+          rawUnpaid !== undefined &&
+          String(rawUnpaid).trim() !== "";
 
         const charge = num(line[mc.chargeIdx]);
         if (charge > 0 && charge <= 50000) monthlyAmount = charge;
@@ -275,7 +351,7 @@ function parseCurrent2026Workbook(workbook: XLSX.WorkBook, sourceFile: string): 
           lastPaidMonth = dateText || monthText(2026, mc.month);
         }
 
-        if (hasValue) {
+        if (hasUnpaidCell) {
           latestMonth = monthText(2026, mc.month);
           latestUnpaid = num(rawUnpaid);
         }
@@ -283,8 +359,9 @@ function parseCurrent2026Workbook(workbook: XLSX.WorkBook, sourceFile: string): 
 
       if (!latestMonth) continue;
 
-      const currentUnpaid = Math.max(0, latestUnpaid);
-      const unpaidMonths = monthlyAmount > 0 ? Math.ceil(currentUnpaid / monthlyAmount) : 0;
+      const unpaidMonths = latestUnpaid > 0 && monthlyAmount > 0
+        ? Math.ceil(latestUnpaid / monthlyAmount)
+        : 0;
 
       results.push({
         sourceFile,
@@ -298,7 +375,7 @@ function parseCurrent2026Workbook(workbook: XLSX.WorkBook, sourceFile: string): 
         billingStartMonth: "",
         latestMonth,
         historyCount: 0,
-        totalUnpaid: currentUnpaid,
+        totalUnpaid: latestUnpaid,
         unpaidMonths,
         paidEventMonths: 0,
         paidTotalAmount: 0,
@@ -308,6 +385,7 @@ function parseCurrent2026Workbook(workbook: XLSX.WorkBook, sourceFile: string): 
     }
   }
 
+  console.log("[v80] 2026미수금 xlsm 추출 결과", results.length);
   return results;
 }
 
@@ -385,7 +463,7 @@ export default function PaymentHistory() {
         const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
         const rows = parseCurrent2026Workbook(workbook, file.name);
         nextSummaries.push(...rows);
-        setStatus(`${file.name}에서 현재 미수금 ${rows.length.toLocaleString("ko-KR")}명 추출`);
+        setStatus(`${file.name}에서 2026미수금 xlsm 추출 ${rows.length.toLocaleString("ko-KR")}명`);
         continue;
       }
 
@@ -471,7 +549,7 @@ export default function PaymentHistory() {
     <div className="p-6 space-y-5">
       <div>
         <h1 className="text-2xl font-bold">납부이력 추적</h1>
-        <div className="text-xs text-emerald-600 font-semibold mt-1">v79 2026미수금 직접 추출 화면</div>
+        <div className="text-xs text-emerald-600 font-semibold mt-1">v80 2026미수금 직접 추출 화면</div>
         <p className="text-sm text-slate-500 mt-1">
           [사용]2026미수금.xlsm의 최신 월 미수금 컬럼을 현재 미수금으로 저장합니다.
         </p>
