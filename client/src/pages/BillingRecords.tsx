@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -62,7 +62,7 @@ function PaymentArrearsSummaryV67() {
     <div className="rounded-xl border border-slate-200 bg-white p-4 mb-5 shadow-sm">
       <div className="flex items-center justify-between mb-3">
         <div>
-          <div className="font-semibold text-slate-900">납부이력 연동 요약 v68</div>
+          <div className="font-semibold text-slate-900">납부이력 연동 요약 v67</div>
           <div className="text-xs text-slate-500 mt-1">
             과거 납부이력 DB 기준입니다. 부과시작월, 미납시작월, 미납개월수, 미수금, 최근납부일을 바로 확인합니다.
           </div>
@@ -119,38 +119,6 @@ function PaymentArrearsSummaryV67() {
   );
 }
 
-
-
-function HideLegacyBillingRecordsListV68Safe() {
-  useEffect(() => {
-    const hideLegacyList = () => {
-      const nodes = Array.from(document.querySelectorAll("div, section, article"));
-      for (const node of nodes) {
-        const text = (node.textContent || "").trim();
-        if (!text.includes("납부현황 목록")) continue;
-
-        const box =
-          node.closest(".rounded-xl") ||
-          node.closest(".rounded-lg") ||
-          node.closest("section") ||
-          node;
-
-        if (box instanceof HTMLElement) {
-          box.style.display = "none";
-          box.setAttribute("data-hidden-by-v68", "legacy-billing-records-list");
-          return;
-        }
-      }
-    };
-
-    hideLegacyList();
-    const timer = window.setInterval(hideLegacyList, 500);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  return null;
-}
-
 export default function BillingRecords() {
   const [searchText, setSearchText] = useState("");
 
@@ -182,7 +150,6 @@ export default function BillingRecords() {
 
   return (
     <div className="p-6 space-y-5 max-w-7xl">
-      <HideLegacyBillingRecordsListV68Safe />
       <PaymentArrearsSummaryV67 />
       {/* Header */}
       <div className="flex items-center justify-between">
