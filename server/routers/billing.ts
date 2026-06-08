@@ -2,116 +2,6 @@ import pg from "pg";
 import { z } from "zod";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import {
-
-/* v81 billing records safe sql guard */
-
-function getBillingDbV81(scope: any): any {
-  return scope?.pool ?? scope?.db ?? scope?.client ?? scope?.conn ?? scope;
-}
-
-function isEmptySqlV81(sql: any): boolean {
-  if (sql === null || sql === undefined) return true;
-  if (typeof sql === "string") return sql.trim().length === 0;
-  if (Array.isArray(sql)) return sql.length === 0 || sql.every((v) => isEmptySqlV81(v));
-  if (typeof sql === "object") {
-    const text = (sql as any).text ?? (sql as any).sql ?? (sql as any).query;
-    if (typeof text === "string") return text.trim().length === 0;
-  }
-  return false;
-}
-
-async function safeQueryV81(clientOrPool: any, sql: any, params?: any[]): Promise<any> {
-  if (!clientOrPool || typeof clientOrPool.query !== "function") {
-    return { rows: [], rowCount: 0 };
-  }
-  if (isEmptySqlV81(sql)) {
-    console.warn("[v81] empty SQL blocked in billing records");
-    return { rows: [], rowCount: 0 };
-  }
-  if (params === undefined) return clientOrPool.query(sql);
-  return clientOrPool.query(sql, params);
-}
-
-async function ensurePaymentHistoryTablesV81(db: any): Promise<void> {
-  const createSummary = `
-    CREATE TABLE IF NOT EXISTS payment_history_summary (
-      id SERIAL PRIMARY KEY,
-      vehicle_no TEXT,
-      name TEXT,
-      region TEXT,
-      billing_item TEXT,
-      charge_start_month TEXT,
-      total_months INTEGER DEFAULT 0,
-      unpaid_months INTEGER DEFAULT 0,
-      arrears_amount INTEGER DEFAULT 0,
-      last_paid_month TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `;
-
-  const createRows = `
-    CREATE TABLE IF NOT EXISTS payment_history_rows (
-      id SERIAL PRIMARY KEY,
-      vehicle_no TEXT,
-      name TEXT,
-      region TEXT,
-      billing_item TEXT,
-      billing_month TEXT,
-      charge_amount INTEGER DEFAULT 0,
-      paid_amount INTEGER DEFAULT 0,
-      arrears_amount INTEGER DEFAULT 0,
-      source_file TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `;
-
-  await safeQueryV81(db, createSummary);
-  await safeQueryV81(db, createRows);
-}
-
-
-/* v81 arrears field aliases */
-function pickArrearsAmountV81(row: any): number {
-  return toNumberV81(
-    row?.arrears_amount ??
-    row?.current_arrears_amount ??
-    row?.current_unpaid_amount ??
-    row?.misu_amount ??
-    row?.unpaid_amount ??
-    row?.미수금 ??
-    row?.현재미수금 ??
-    row?.["미수금"] ??
-    0
-  );
-}
-
-function pickUnpaidMonthsV81(row: any): number {
-  return toNumberV81(
-    row?.unpaid_months ??
-    row?.unpaid_count ??
-    row?.arrears_months ??
-    row?.misu_months ??
-    row?.미납발생개월수 ??
-    row?.["미납발생개월수"] ??
-    0
-  );
-}
-
-function normalizeVehicleNoV81(v: any): string {
-  return String(v ?? "")
-    .replace(/\s+/g, "")
-    .replace(/호$/g, "")
-    .trim();
-}
-
-function toNumberV81(v: any): number {
-  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
-  const n = Number(String(v ?? "").replace(/[^0-9.-]/g, ""));
-  return Number.isFinite(n) ? n : 0;
-}
-
-
   getBillingCandidates,
   getBillingCandidateById,
   createBillingCandidate,
@@ -137,10 +27,10 @@ async function safePaymentHistoryQueryV78(pool: any, query: any, params?: any[])
     console.warn('[payment-history:v78] blocked empty SQL query');
     return { rows: [], rowCount: 0 };
   }
-  return params ? safeQueryV81(pool, query, params) : safeQueryV81(pool, query);
+  return params ? pool.query(query, params) : pool.query(query);
 }
 async function ensurePaymentHistoryRowsTableV78(pool: any) {
-  await safeQueryV81(pool, `
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS payment_history_rows (
       id SERIAL PRIMARY KEY,
       vehicle_no TEXT,
@@ -157,11 +47,11 @@ async function ensurePaymentHistoryRowsTableV78(pool: any) {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
-  await safeQueryV81(pool, `CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_history_row ON payment_history_rows(vehicle_no_norm, name, billing_type, billing_month)`);
-  await safeQueryV81(pool, `CREATE INDEX IF NOT EXISTS idx_payment_history_vehicle ON payment_history_rows(vehicle_no_norm)`);
-  await safeQueryV81(pool, `CREATE INDEX IF NOT EXISTS idx_payment_history_name ON payment_history_rows(name)`);
-  await safeQueryV81(pool, `CREATE INDEX IF NOT EXISTS idx_payment_history_month ON payment_history_rows(billing_month)`);
-  await safeQueryV81(pool, `CREATE INDEX IF NOT EXISTS idx_payment_history_type ON payment_history_rows(billing_type)`);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_history_row ON payment_history_rows(vehicle_no_norm, name, billing_type, billing_month)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_history_vehicle ON payment_history_rows(vehicle_no_norm)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_history_name ON payment_history_rows(name)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_history_month ON payment_history_rows(billing_month)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_history_type ON payment_history_rows(billing_type)`);
 }
 // v77 hard guard: PostgreSQL throws "Received unexpected emptyQuery message from backend"
 // when pool.query receives an empty SQL string. This wrapper makes empty SQL a safe no-op
@@ -1159,9 +1049,9 @@ async function insertPaymentHistoryRowsV61(input: any) {
   let skippedCount = 0;
 
   try {
-    await safeQueryV81(client, "BEGIN");
+    await client.query("BEGIN");
 
-    const importResult = await safeQueryV81(client, 
+    const importResult = await client.query(
       `INSERT INTO payment_history_imports (file_name, row_count)
        VALUES ($1, $2)
        RETURNING id`,
@@ -1180,7 +1070,7 @@ async function insertPaymentHistoryRowsV61(input: any) {
         continue;
       }
 
-      const result = await safeQueryV81(client, 
+      const result = await client.query(
         `INSERT INTO payment_history_rows (
             source_file, source_sheet, source_row, region, account,
             vehicle_no, vehicle_no_norm, name, billing_month, billing_type,
@@ -1223,14 +1113,14 @@ async function insertPaymentHistoryRowsV61(input: any) {
       else updatedCount++;
     }
 
-    await safeQueryV81(client, 
+    await client.query(
       `UPDATE payment_history_imports
        SET inserted_count=$1, updated_count=$2, skipped_count=$3
        WHERE id=$4`,
       [insertedCount, updatedCount, skippedCount, importResult.rows[0].id]
     );
 
-    await safeQueryV81(client, "COMMIT");
+    await client.query("COMMIT");
 
     return {
       ok: true,
@@ -1243,7 +1133,7 @@ async function insertPaymentHistoryRowsV61(input: any) {
       totalStored: insertedCount + updatedCount,
     };
   } catch (error) {
-    await safeQueryV81(client, "ROLLBACK");
+    await client.query("ROLLBACK");
     throw error;
   } finally {
     client.release();
@@ -1661,7 +1551,7 @@ function numV74(value: any): number {
 async function ensurePaymentHistoryTablesV74() {
   const pool = getPaymentHistoryPoolV74();
 
-  await safeQueryV81(pool, [
+  await pool.query([
     "CREATE TABLE IF NOT EXISTS payment_history_imports (",
     "  id BIGSERIAL PRIMARY KEY,",
     "  file_name TEXT,",
@@ -1673,7 +1563,7 @@ async function ensurePaymentHistoryTablesV74() {
     ")"
   ].join("\n"));
 
-  await safeQueryV81(pool, [
+  await pool.query([
     "CREATE TABLE IF NOT EXISTS payment_history_rows (",
     "  id BIGSERIAL PRIMARY KEY,",
     "  source_file TEXT,",
@@ -1696,10 +1586,10 @@ async function ensurePaymentHistoryTablesV74() {
     ")"
   ].join("\n"));
 
-  await safeQueryV81(pool, "CREATE INDEX IF NOT EXISTS idx_payment_history_v74_vehicle ON payment_history_rows(vehicle_no_norm)");
-  await safeQueryV81(pool, "CREATE INDEX IF NOT EXISTS idx_payment_history_v74_name ON payment_history_rows(name)");
-  await safeQueryV81(pool, "CREATE INDEX IF NOT EXISTS idx_payment_history_v74_month ON payment_history_rows(billing_month)");
-  await safeQueryV81(pool, "CREATE INDEX IF NOT EXISTS idx_payment_history_v74_type ON payment_history_rows(billing_type)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_payment_history_v74_vehicle ON payment_history_rows(vehicle_no_norm)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_payment_history_v74_name ON payment_history_rows(name)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_payment_history_v74_month ON payment_history_rows(billing_month)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_payment_history_v74_type ON payment_history_rows(billing_type)");
 }
 
 async function insertPaymentHistoryRowsV74(input: any) {
@@ -1730,9 +1620,9 @@ async function insertPaymentHistoryRowsV74(input: any) {
   let skippedCount = 0;
 
   try {
-    await safeQueryV81(client, "BEGIN");
+    await client.query("BEGIN");
 
-    const importResult = await safeQueryV81(client, 
+    const importResult = await client.query(
       [
         "INSERT INTO payment_history_imports (file_name, row_count)",
         "VALUES ($1, $2)",
@@ -1755,7 +1645,7 @@ async function insertPaymentHistoryRowsV74(input: any) {
         continue;
       }
 
-      const result = await safeQueryV81(client, 
+      const result = await client.query(
         [
           "INSERT INTO payment_history_rows (",
           "  source_file, source_sheet, source_row, region, account,",
@@ -1801,7 +1691,7 @@ async function insertPaymentHistoryRowsV74(input: any) {
     }
 
     if (importId) {
-      await safeQueryV81(client, 
+      await client.query(
         [
           "UPDATE payment_history_imports",
           "SET inserted_count=$1, updated_count=$2, skipped_count=$3",
@@ -1811,7 +1701,7 @@ async function insertPaymentHistoryRowsV74(input: any) {
       );
     }
 
-    await safeQueryV81(client, "COMMIT");
+    await client.query("COMMIT");
 
     return {
       ok: true,
@@ -1824,7 +1714,7 @@ async function insertPaymentHistoryRowsV74(input: any) {
       totalStored: insertedCount + updatedCount,
     };
   } catch (error) {
-    await safeQueryV81(client, "ROLLBACK");
+    await client.query("ROLLBACK");
     throw error;
   } finally {
     client.release();
@@ -1870,7 +1760,7 @@ async function getPaymentHistorySummaryV74() {
     "ORDER BY latest.latest_balance DESC, latest.vehicle_no ASC"
   ].join("\n");
 
-  const result = await safeQueryV81(pool, sql);
+  const result = await pool.query(sql);
   return result.rows || [];
 }
 
@@ -1892,7 +1782,7 @@ async function getPaymentHistoryStatsV74() {
     "FROM latest"
   ].join("\n");
 
-  const result = await safeQueryV81(pool, sql);
+  const result = await pool.query(sql);
   return result.rows?.[0] || { trackedMembers: 0, currentBalanceTotal: 0, membersWithBalance: 0 };
 }
 
@@ -1951,7 +1841,7 @@ async function getPaymentHistoryCurrentArrearsV74() {
     "ORDER BY l.latest_balance DESC, l.vehicle_no ASC"
   ].join("\n");
 
-  const result = await safeQueryV81(pool, sql);
+  const result = await pool.query(sql);
   return result.rows || [];
 }
 /* v74 stable payment history handlers end */
@@ -2019,7 +1909,7 @@ function minusMonthsV77(monthText: any, count: any): string | null {
 async function ensurePaymentHistoryTablesV77() {
   const pool = getPaymentHistoryPoolV77();
 
-  await safeQueryV81(pool, [
+  await pool.query([
     "CREATE TABLE IF NOT EXISTS payment_history_summary_rows (",
     "  id BIGSERIAL PRIMARY KEY,",
     "  source_file TEXT,",
@@ -2045,9 +1935,9 @@ async function ensurePaymentHistoryTablesV77() {
     ")"
   ].join("\n"));
 
-  await safeQueryV81(pool, "CREATE INDEX IF NOT EXISTS idx_ph_summary_v77_vehicle ON payment_history_summary_rows(vehicle_no_norm)");
-  await safeQueryV81(pool, "CREATE INDEX IF NOT EXISTS idx_ph_summary_v77_name ON payment_history_summary_rows(name)");
-  await safeQueryV81(pool, "CREATE INDEX IF NOT EXISTS idx_ph_summary_v77_balance ON payment_history_summary_rows(current_balance_amount)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_ph_summary_v77_vehicle ON payment_history_summary_rows(vehicle_no_norm)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_ph_summary_v77_name ON payment_history_summary_rows(name)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_ph_summary_v77_balance ON payment_history_summary_rows(current_balance_amount)");
 }
 
 async function insertPaymentHistorySummaryRowsV77(input: any) {
@@ -2060,7 +1950,7 @@ async function insertPaymentHistorySummaryRowsV77(input: any) {
   let skippedCount = 0;
 
   try {
-    await safeQueryV81(client, "BEGIN");
+    await client.query("BEGIN");
 
     for (const row of input.rows || []) {
       const vehicleNo = String(row.vehicleNo || "").trim();
@@ -2073,7 +1963,7 @@ async function insertPaymentHistorySummaryRowsV77(input: any) {
         continue;
       }
 
-      const result = await safeQueryV81(client, 
+      const result = await client.query(
         [
           "INSERT INTO payment_history_summary_rows (",
           "  source_file, current_id, region, account, vehicle_no, vehicle_no_norm, name, note,",
@@ -2125,7 +2015,7 @@ async function insertPaymentHistorySummaryRowsV77(input: any) {
       else updatedCount++;
     }
 
-    await safeQueryV81(client, "COMMIT");
+    await client.query("COMMIT");
     return {
       ok: true,
       insertedCount,
@@ -2135,7 +2025,7 @@ async function insertPaymentHistorySummaryRowsV77(input: any) {
       totalStored: insertedCount + updatedCount,
     };
   } catch (error) {
-    await safeQueryV81(client, "ROLLBACK");
+    await client.query("ROLLBACK");
     throw error;
   } finally {
     client.release();
@@ -2145,7 +2035,7 @@ async function insertPaymentHistorySummaryRowsV77(input: any) {
 async function getPaymentHistorySummaryV77() {
   await ensurePaymentHistoryTablesV77();
   const pool = getPaymentHistoryPoolV77();
-  const result = await safeQueryV81(pool, [
+  const result = await pool.query([
     "SELECT",
     "  vehicle_no_norm || '|' || name || '|' || account AS \"candidateId\",",
     "  vehicle_no AS \"vehicleNo\",",
@@ -2167,7 +2057,7 @@ async function getPaymentHistorySummaryV77() {
 async function getPaymentHistoryStatsV77() {
   await ensurePaymentHistoryTablesV77();
   const pool = getPaymentHistoryPoolV77();
-  const result = await safeQueryV81(pool, [
+  const result = await pool.query([
     "SELECT",
     "  COUNT(*)::int AS \"trackedMembers\",",
     "  COALESCE(SUM(current_balance_amount), 0)::int AS \"currentBalanceTotal\",",
@@ -2180,7 +2070,7 @@ async function getPaymentHistoryStatsV77() {
 async function getPaymentHistoryCurrentArrearsV77() {
   await ensurePaymentHistoryTablesV77();
   const pool = getPaymentHistoryPoolV77();
-  const result = await safeQueryV81(pool, [
+  const result = await pool.query([
     "SELECT",
     "  vehicle_no AS \"vehicleNo\",",
     "  name AS \"name\",",
@@ -2231,7 +2121,7 @@ function numV78(value: any): number {
 
 async function ensurePaymentHistorySummaryRowsV78() {
   const pool = getPaymentHistoryPoolV78();
-  await safeQueryV81(pool, [
+  await pool.query([
     "CREATE TABLE IF NOT EXISTS payment_history_summary_rows (",
     "  id BIGSERIAL PRIMARY KEY,",
     "  source_file TEXT,",
@@ -2268,7 +2158,7 @@ async function insertPaymentHistorySummaryRowsV78(input: any) {
   let skippedCount = 0;
 
   try {
-    await safeQueryV81(client, "BEGIN");
+    await client.query("BEGIN");
 
     for (const row of input.rows || []) {
       const vehicleNo = String(row.vehicleNo || "").trim();
@@ -2281,7 +2171,7 @@ async function insertPaymentHistorySummaryRowsV78(input: any) {
         continue;
       }
 
-      const result = await safeQueryV81(client, 
+      const result = await client.query(
         [
           "INSERT INTO payment_history_summary_rows (",
           "  source_file, current_id, region, account, vehicle_no, vehicle_no_norm, name, note,",
@@ -2333,10 +2223,10 @@ async function insertPaymentHistorySummaryRowsV78(input: any) {
       else updatedCount++;
     }
 
-    await safeQueryV81(client, "COMMIT");
+    await client.query("COMMIT");
     return { ok: true, insertedCount, updatedCount, skippedCount, matchedCount: insertedCount + updatedCount, totalStored: insertedCount + updatedCount };
   } catch (error) {
-    await safeQueryV81(client, "ROLLBACK");
+    await client.query("ROLLBACK");
     throw error;
   } finally {
     client.release();
@@ -2396,7 +2286,7 @@ function numV79(value: any): number {
 async function ensurePaymentHistorySummaryRowsV79() {
   const pool = getPaymentHistoryPoolV79();
 
-  await safeQueryV81(pool, [
+  await pool.query([
     "CREATE TABLE IF NOT EXISTS payment_history_summary_rows (",
     "  id BIGSERIAL PRIMARY KEY,",
     "  source_file TEXT,",
@@ -2422,8 +2312,8 @@ async function ensurePaymentHistorySummaryRowsV79() {
     ")"
   ].join("\n"));
 
-  await safeQueryV81(pool, "CREATE INDEX IF NOT EXISTS idx_ph_summary_v79_vehicle ON payment_history_summary_rows(vehicle_no_norm)");
-  await safeQueryV81(pool, "CREATE INDEX IF NOT EXISTS idx_ph_summary_v79_name ON payment_history_summary_rows(name)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_ph_summary_v79_vehicle ON payment_history_summary_rows(vehicle_no_norm)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_ph_summary_v79_name ON payment_history_summary_rows(name)");
 }
 
 async function insertPaymentHistorySummaryRowsV79(input: any) {
@@ -2436,7 +2326,7 @@ async function insertPaymentHistorySummaryRowsV79(input: any) {
   let skippedCount = 0;
 
   try {
-    await safeQueryV81(client, "BEGIN");
+    await client.query("BEGIN");
 
     for (const row of input.rows || []) {
       const vehicleNo = String(row.vehicleNo || "").trim();
@@ -2449,7 +2339,7 @@ async function insertPaymentHistorySummaryRowsV79(input: any) {
         continue;
       }
 
-      const result = await safeQueryV81(client, 
+      const result = await client.query(
         [
           "INSERT INTO payment_history_summary_rows (",
           "  source_file, current_id, region, account, vehicle_no, vehicle_no_norm, name, note,",
@@ -2501,10 +2391,10 @@ async function insertPaymentHistorySummaryRowsV79(input: any) {
       else updatedCount++;
     }
 
-    await safeQueryV81(client, "COMMIT");
+    await client.query("COMMIT");
     return { ok: true, insertedCount, updatedCount, skippedCount, matchedCount: insertedCount + updatedCount, totalStored: insertedCount + updatedCount };
   } catch (error) {
-    await safeQueryV81(client, "ROLLBACK");
+    await client.query("ROLLBACK");
     throw error;
   } finally {
     client.release();
@@ -2514,7 +2404,7 @@ async function insertPaymentHistorySummaryRowsV79(input: any) {
 async function getPaymentHistorySummaryV79() {
   await ensurePaymentHistorySummaryRowsV79();
   const pool = getPaymentHistoryPoolV79();
-  const result = await safeQueryV81(pool, [
+  const result = await pool.query([
     "SELECT",
     "  vehicle_no_norm || '|' || name || '|' || account AS \"candidateId\",",
     "  vehicle_no AS \"vehicleNo\",",
@@ -2553,7 +2443,7 @@ async function getPaymentHistoryCurrentArrearsV79() {
 async function getPaymentHistoryStatsV79() {
   await ensurePaymentHistorySummaryRowsV79();
   const pool = getPaymentHistoryPoolV79();
-  const result = await safeQueryV81(pool, [
+  const result = await pool.query([
     "SELECT",
     "  COUNT(*)::int AS \"trackedMembers\",",
     "  COALESCE(SUM(current_balance_amount), 0)::int AS \"currentBalanceTotal\",",
