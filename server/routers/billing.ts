@@ -958,7 +958,28 @@ function getPaymentHistoryPoolV61() {
     });
   }
 
-  return paymentHistoryPoolV61;
+  
+  if (!paymentHistoryPoolV61.__safePaymentHistoryQueryV73) {
+    const originalQueryV73 = paymentHistoryPoolV61.query.bind(paymentHistoryPoolV61);
+    paymentHistoryPoolV61.query = (queryText: any, params?: any) => {
+      const sqlText =
+        typeof queryText === "string"
+          ? queryText
+          : typeof queryText?.text === "string"
+            ? queryText.text
+            : "";
+
+      if (!sqlText || !sqlText.trim()) {
+        console.warn("[v73] Blocked empty payment history SQL query");
+        return Promise.resolve({ rows: [], rowCount: 0 });
+      }
+
+      return originalQueryV73(queryText, params);
+    };
+    paymentHistoryPoolV61.__safePaymentHistoryQueryV73 = true;
+  }
+
+return paymentHistoryPoolV61;
 }
 
 function normalizeVehicleV61(value: any): string {
@@ -2162,33 +2183,176 @@ export const billingRouter = router({
 
 
 
+
   paymentHistorySummary: publicProcedure
     .query(async () => {
-      try {
-        return await getPaymentHistorySummaryV76();
-      } catch (error) {
-        console.error("[payment-history:v76] paymentHistorySummary failed", error);
-        return [];
-      }
+      await ensurePaymentHistoryTablesV61();
+
+      const pool = getPaymentHistoryPoolV61();
+      const sql = [
+        "WITH latest AS (",
+        "  SELECT DISTINCT ON (vehicle_no_norm, name, billing_type)",
+        "    vehicle_no_norm,",
+        "    vehicle_no,",
+        "    name,",
+        "    region,",
+        "    account,",
+        "    billing_type,",
+        "    billing_month AS latest_month,",
+        "    current_balance_amount AS latest_balance",
+        "  FROM payment_history_rows",
+        "  ORDER BY vehicle_no_norm, name, billing_type, billing_month DESC",
+        "),",
+        "grouped AS (",
+        "  SELECT",
+        "    vehicle_no_norm,",
+        "    name,",
+        "    billing_type,",
+        "    MIN(billing_month) AS billing_start_month,",
+        "    COUNT(*)::int AS history_count,",
+        "    SUM(CASE WHEN current_balance_amount > 0 THEN 1 ELSE 0 END)::int AS balance_months,",
+        "    MAX(CASE WHEN balance_decrease_amount > 0 THEN billing_month ELSE NULL END) AS last_decrease_month",
+        "  FROM payment_history_rows",
+        "  GROUP BY vehicle_no_norm, name, billing_type",
+        ")",
+        "SELECT",
+        "  latest.vehicle_no_norm || '|' || latest.name || '|' || latest.billing_type AS \"candidateId\",",
+        "  latest.vehicle_no AS \"vehicleNo\",",
+        "  latest.name AS \"name\",",
+        "  latest.region AS \"region\",",
+        "  latest.account AS \"account\",",
+        "  latest.billing_type AS \"billingType\",",
+        "  grouped.billing_start_month AS \"billingStartMonth\",",
+        "  grouped.history_count AS \"historyCount\",",
+        "  grouped.balance_months AS \"unpaidMonths\",",
+        "  latest.latest_balance AS \"totalUnpaid\",",
+        "  latest.latest_month AS \"latestMonth\",",
+        "  grouped.last_decrease_month AS \"lastPaidMonth\"",
+        "FROM latest",
+        "JOIN grouped",
+        "  ON grouped.vehicle_no_norm = latest.vehicle_no_norm",
+        " AND grouped.name = latest.name",
+        " AND grouped.billing_type = latest.billing_type",
+        "ORDER BY latest.latest_balance DESC, latest.vehicle_no ASC"
+      ].join("\n");
+
+      const result = await pool.query(sql);
+      return result.rows || [];
     }),
 
   paymentHistoryStats: publicProcedure
     .query(async () => {
-      try {
-        return await getPaymentHistoryStatsV76();
-      } catch (error) {
-        console.error("[payment-history:v76] paymentHistoryStats failed", error);
-        return { trackedMembers: 0, currentBalanceTotal: 0, membersWithBalance: 0 };
-      }
+      await ensurePaymentHistoryTablesV61();
+
+      const pool = getPaymentHistoryPoolV61();
+      const sql = [
+        "WITH latest AS (",
+        "  SELECT DISTINCT ON (vehicle_no_norm, name, billing_type)",
+        "    vehicle_no_norm, name, billing_type, current_balance_amount",
+        "  FROM payment_history_rows",
+        "  ORDER BY vehicle_no_norm, name, billing_type, billing_month DESC",
+        ")",
+        "SELECT",
+        "  COUNT(*)::int AS \"trackedMembers\",",
+        "  COALESCE(SUM(current_balance_amount), 0)::int AS \"currentBalanceTotal\",",
+        "  COALESCE(SUM(CASE WHEN current_balance_amount > 0 THEN 1 ELSE 0 END), 0)::int AS \"membersWithBalance\"",
+        "FROM latest"
+      ].join("\n");
+
+      const result = await pool.query(sql);
+      return result.rows?.[0] || {
+        trackedMembers: 0,
+        currentBalanceTotal: 0,
+        membersWithBalance: 0,
+      };
     }),
+
   paymentHistoryCurrentArrears: publicProcedure
     .query(async () => {
-      try {
-        return await getPaymentHistorySummaryV76();
-      } catch (error) {
-        console.error("[payment-history:v76] paymentHistoryCurrentArrears failed", error);
-        return [];
-      }
+      await ensurePaymentHistoryTablesV61();
+
+      const pool = getPaymentHistoryPoolV61();
+      const sql = [
+        "WITH latest AS (",
+        "  SELECT DISTINCT ON (vehicle_no_norm, name, billing_type)",
+        "    vehicle_no_norm,",
+        "    vehicle_no,",
+        "    name,",
+        "    region,",
+        "    billing_type,",
+        "    billing_month AS latest_month,",
+        "    current_balance_amount AS latest_balance",
+        "  FROM payment_history_rows",
+        "  ORDER BY vehicle_no_norm, name, billing_type, billing_month DESC",
+        "),",
+        "base AS (",
+        "  SELECT",
+        "    vehicle_no_norm,",
+        "    name,",
+        "    billing_type,",
+        "    MIN(billing_month) AS first_billing_month,",
+        "    MAX(CASE WHEN balance_decrease_amount > 0 THEN billing_month ELSE NULL END) AS recent_payment_month,",
+        "    MAX(CASE WHEN current_balance_amount = 0 THEN billing_month ELSE NULL END) AS last_zero_month",
+        "  FROM payment_history_rows",
+        "  GROUP BY vehicle_no_norm, name, billing_type",
+        "),",
+        "arrears_start AS (",
+        "  SELECT",
+        "    l.vehicle_no_norm,",
+        "    l.name,",
+        "    l.billing_type,",
+        "    CASE",
+        "      WHEN l.latest_balance > 0 THEN (",
+        "        SELECT MIN(r.billing_month)",
+        "        FROM payment_history_rows r",
+        "        WHERE r.vehicle_no_norm = l.vehicle_no_norm",
+        "          AND r.name = l.name",
+        "          AND r.billing_type = l.billing_type",
+        "          AND r.current_balance_amount > 0",
+        "          AND r.billing_month > COALESCE(b.last_zero_month, '0000-00')",
+        "      )",
+        "      ELSE NULL",
+        "    END AS arrears_start_month",
+        "  FROM latest l",
+        "  JOIN base b",
+        "    ON b.vehicle_no_norm = l.vehicle_no_norm",
+        "   AND b.name = l.name",
+        "   AND b.billing_type = l.billing_type",
+        ")",
+        "SELECT",
+        "  l.vehicle_no AS \"vehicleNo\",",
+        "  l.name AS \"name\",",
+        "  l.region AS \"region\",",
+        "  l.billing_type AS \"billingType\",",
+        "  b.first_billing_month AS \"billingStartMonth\",",
+        "  a.arrears_start_month AS \"arrearsStartMonth\",",
+        "  CASE",
+        "    WHEN l.latest_balance > 0 AND a.arrears_start_month IS NOT NULL THEN",
+        "      (",
+        "        (CAST(SPLIT_PART(l.latest_month, '-', 1) AS INTEGER) * 12 + CAST(SPLIT_PART(l.latest_month, '-', 2) AS INTEGER))",
+        "        -",
+        "        (CAST(SPLIT_PART(a.arrears_start_month, '-', 1) AS INTEGER) * 12 + CAST(SPLIT_PART(a.arrears_start_month, '-', 2) AS INTEGER))",
+        "        + 1",
+        "      )",
+        "    ELSE 0",
+        "  END AS \"arrearsMonths\",",
+        "  l.latest_balance AS \"arrearsAmount\",",
+        "  b.recent_payment_month AS \"recentPaymentMonth\",",
+        "  l.latest_month AS \"latestMonth\"",
+        "FROM latest l",
+        "JOIN base b",
+        "  ON b.vehicle_no_norm = l.vehicle_no_norm",
+        " AND b.name = l.name",
+        " AND b.billing_type = l.billing_type",
+        "JOIN arrears_start a",
+        "  ON a.vehicle_no_norm = l.vehicle_no_norm",
+        " AND a.name = l.name",
+        " AND a.billing_type = l.billing_type",
+        "ORDER BY l.latest_balance DESC, l.vehicle_no ASC"
+      ].join("\n");
+
+      const result = await pool.query(sql);
+      return result.rows || [];
     }),
 });
 
