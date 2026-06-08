@@ -905,7 +905,7 @@ function numV61(value: any): number {
 }
 
 async function ensurePaymentHistoryTablesV61() {
-  const pool = getPaymentHistoryPoolV61();
+  const pool = getPaymentHistoryPoolSafeV75();
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS payment_history_imports (
@@ -951,7 +951,7 @@ async function ensurePaymentHistoryTablesV61() {
 async function insertPaymentHistoryRowsV61(input: any) {
   await ensurePaymentHistoryTablesV61();
 
-  const pool = getPaymentHistoryPoolV61();
+  const pool = getPaymentHistoryPoolSafeV75();
   const client = await pool.connect();
 
   let insertedCount = 0;
@@ -1053,7 +1053,7 @@ async function insertPaymentHistoryRowsV61(input: any) {
 async function getPaymentHistorySummaryV61() {
   await ensurePaymentHistoryTablesV61();
 
-  const pool = getPaymentHistoryPoolV61();
+  const pool = getPaymentHistoryPoolSafeV75();
   const result = await pool.query(`
     WITH latest AS (
       SELECT DISTINCT ON (vehicle_no_norm, name, billing_type)
@@ -1107,7 +1107,7 @@ async function getPaymentHistorySummaryV61() {
 async function getPaymentHistoryStatsV61() {
   await ensurePaymentHistoryTablesV61();
 
-  const pool = getPaymentHistoryPoolV61();
+  const pool = getPaymentHistoryPoolSafeV75();
   const result = await pool.query(`
     WITH latest AS (
       SELECT DISTINCT ON (vehicle_no_norm, name, billing_type)
@@ -1131,6 +1131,43 @@ async function getPaymentHistoryStatsV61() {
 /* v61 payment history DB persistence end */
 
 
+
+/* v75 payment history emptyQuery guard */
+function patchPaymentHistoryPoolEmptyQueryV75(pool: any): any {
+  if (!pool || pool.__paymentHistoryEmptyQueryGuardV75) return pool;
+
+  const originalQuery = pool.query?.bind(pool);
+  if (typeof originalQuery !== "function") return pool;
+
+  pool.query = (queryTextOrConfig: any, ...args: any[]) => {
+    const sqlText = typeof queryTextOrConfig === "string"
+      ? queryTextOrConfig
+      : queryTextOrConfig && typeof queryTextOrConfig.text === "string"
+        ? queryTextOrConfig.text
+        : null;
+
+    if (typeof sqlText === "string" && sqlText.trim() === "") {
+      console.warn("[payment-history:v75] blocked empty database query");
+      return Promise.resolve({ rows: [], rowCount: 0, command: "EMPTY_QUERY_BLOCKED" });
+    }
+
+    return originalQuery(queryTextOrConfig, ...args);
+  };
+
+  Object.defineProperty(pool, "__paymentHistoryEmptyQueryGuardV75", {
+    value: true,
+    enumerable: false,
+    configurable: false,
+  });
+
+  return pool;
+}
+
+function getPaymentHistoryPoolSafeV75(): any {
+  return patchPaymentHistoryPoolEmptyQueryV75(getPaymentHistoryPoolV61());
+}
+/* v75 payment history emptyQuery guard end */
+
 /* v73 payment history summary calculation fix */
 async function paymentHistoryTableExistsV73(pool: any): Promise<boolean> {
   const result = await pool.query("SELECT to_regclass('public.payment_history_rows') AS table_name");
@@ -1140,7 +1177,7 @@ async function paymentHistoryTableExistsV73(pool: any): Promise<boolean> {
 async function getPaymentHistorySummaryV73() {
   await ensurePaymentHistoryTablesV61();
 
-  const pool = getPaymentHistoryPoolV61();
+  const pool = getPaymentHistoryPoolSafeV75();
   const exists = await paymentHistoryTableExistsV73(pool);
   if (!exists) return [];
 
