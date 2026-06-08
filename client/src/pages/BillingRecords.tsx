@@ -26,7 +26,26 @@ function SummaryCard({
   return (
     <Card className="bg-white border border-slate-200 rounded-xl shadow-sm">
       <CardContent className="p-5">
-{[...Array(6)].map((_, i) => (
+        <div className="flex items-start justify-between mb-3">
+          <div className={`w-10 h-10 rounded-xl ${iconBg} flex items-center justify-center`}>
+            <Icon className={`w-5 h-5 ${iconColor}`} />
+          </div>
+        </div>
+        <div className={`text-2xl font-bold tabular-nums ${valueColor}`}>
+          {value.toLocaleString()}
+        </div>
+        <div className="text-xs text-slate-500 mt-1 font-medium flex items-center gap-1">
+          {title} <span className="text-slate-400">{unit}</span>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function TableSkeleton() {
+  return (
+    <div className="space-y-2 py-2">
+      {[...Array(6)].map((_, i) => (
         <div key={i} className="h-12 bg-slate-100 rounded-lg animate-pulse" />
       ))}
     </div>
@@ -35,16 +54,15 @@ function SummaryCard({
 
 
 
-function PaymentArrearsSummaryV66() {
+function PaymentArrearsSummaryV67() {
   const query = trpc.billing.paymentHistoryCurrentArrears.useQuery(undefined, { retry: false });
   const rows = query.data || [];
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 mb-5 shadow-sm">
-      <PaymentArrearsSummaryV66 />
       <div className="flex items-center justify-between mb-3">
         <div>
-          <div className="font-semibold text-slate-900">납부이력 연동 요약 v66</div>
+          <div className="font-semibold text-slate-900">납부이력 연동 요약 v67</div>
           <div className="text-xs text-slate-500 mt-1">
             과거 납부이력 DB 기준입니다. 부과시작월, 미납시작월, 미납개월수, 미수금, 최근납부일을 바로 확인합니다.
           </div>
@@ -102,7 +120,7 @@ function PaymentArrearsSummaryV66() {
 }
 
 export default function BillingRecords() {
-const [searchText, setSearchText] = useState("");
+  const [searchText, setSearchText] = useState("");
 
   const { data: records = [], isLoading } = trpc.billing.listBillingRecords.useQuery({});
 
@@ -132,6 +150,7 @@ const [searchText, setSearchText] = useState("");
 
   return (
     <div className="p-6 space-y-5 max-w-7xl">
+      <PaymentArrearsSummaryV67 />
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
