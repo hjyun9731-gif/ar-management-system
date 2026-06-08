@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import JSZip from "jszip";
+import * as XLSX from "xlsx";
 import { trpc } from "@/lib/trpc";
 
 type SummaryRow = {
@@ -151,6 +152,175 @@ function monthlyFromCsvRow(row: Record<string, string>, sourceFile: string, inde
   };
 }
 
+
+function compactNameV78(value: unknown): string {
+  return String(value || "").replace(/\s+/g, "").trim();
+}
+
+function normalizeVehicleFrom2026V78(value: unknown): string {
+  const raw = String(value || "").replace(/\s+/g, " ").trim();
+  if (!raw) return "";
+  if (raw.startsWith("강원") && raw.endsWith("호")) return raw;
+
+  const compact = raw.replace(/\s+/g, "");
+  let m = compact.match(/^(\d{2})-(\d{4})$/);
+  if (m) return `강원${m[1]}자 ${m[2]}호`;
+
+  m = compact.match(/^(\d{2})(자|배|바)(\d{4})$/);
+  if (m) return `강원${m[1]}${m[2]} ${m[3]}호`;
+
+  m = compact.match(/^강원(\d{2})(자|배|바)(\d{4})호?$/);
+  if (m) return `강원${m[1]}${m[2]} ${m[3]}호`;
+
+  return raw.endsWith("호") ? raw : raw + "호";
+}
+
+function excelDateToTextV78(value: unknown): string {
+  if (!value) return "";
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+  if (typeof value === "number") {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    if (parsed) {
+      return `${parsed.y}-${String(parsed.m).padStart(2, "0")}-${String(parsed.d).padStart(2, "0")}`;
+    }
+  }
+  const text = String(value).trim();
+  const m = text.match(/(20\d{2})[-.\/](\d{1,2})[-.\/](\d{1,2})/);
+  if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+  return text;
+}
+
+function parseCurrent2026WorkbookV78(workbook: XLSX.WorkBook, sourceFile: string): SummaryRow[] {
+  const sheetName = workbook.SheetNames.includes("2026년회비내역")
+    ? "2026년회비내역"
+    : workbook.SheetNames[0];
+
+  const sheet = workbook.Sheets[sheetName];
+  const matrix = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, raw: true, defval: "" });
+  if (matrix.length < 2) return [];
+
+  const headers = (matrix[0] || []).map((h) => String(h || "").trim());
+  const col = (name: string) => headers.findIndex((h) => h.replace(/\s+/g, "") === name.replace(/\s+/g, ""));
+
+  const regionIdx = col("지역");
+  const accountIdx = col("계정");
+  const noteIdx = col("비고");
+  const vehicleIdx = col("차량번호");
+  const nameIdx = headers.findIndex((h) => h.replace(/\s+/g, "") === "성명");
+
+  const monthCols: { month: number; unpaidIdx: number; paidIdx: number; dateIdx: number; chargeIdx: number }[] = [];
+  for (let i = 0; i < headers.length; i++) {
+    const m = headers[i].match(/^(\d{1,2})월미수금$/);
+    if (m) {
+      const month = Number(m[1]);
+      monthCols.push({ month, unpaidIdx: i, paidIdx: i - 2, dateIdx: i - 1, chargeIdx: i - 3 });
+    }
+  }
+
+  const rows: SummaryRow[] = [];
+
+  for (let r = 1; r < matrix.length; r++) {
+    const line = matrix[r] || [];
+    const vehicleNo = normalizeVehicleFrom2026V78(line[vehicleIdx]);
+    const name = compactNameV78(line[nameIdx]);
+    if (!vehicleNo || !name) continue;
+
+    const account = String(line[accountIdx] || "").trim();
+    const region = String(line[regionIdx] || "").trim();
+    const note = String(line[noteIdx] || "").trim();
+
+    let latestMonth = "";
+    let latestUnpaid = 0;
+    let latestMonthNumber = 0;
+    let monthlyAmount = account.includes("관리비") ? 5000 : 10000;
+    let lastPaidDate = "";
+
+    for (const mc of monthCols) {
+      const rawUnpaid = line[mc.unpaidIdx];
+      const rawCharge = line[mc.chargeIdx];
+      const rawPaid = line[mc.paidIdx];
+      const rawDate = line[mc.dateIdx];
+
+      if (num(rawCharge) > 0) monthlyAmount = num(rawCharge) > 0 && num(rawCharge) <= 20000 ? num(rawCharge) : monthlyAmount;
+
+      const hasUnpaidValue = rawUnpaid !== "" && rawUnpaid !== null && rawUnpaid !== undefined;
+      if (hasUnpaidValue) {
+        latestMonthNumber = mc.month;
+        latestMonth = `2026-${String(mc.month).padStart(2, "0")}`;
+        latestUnpaid = num(rawUnpaid);
+      }
+
+      if (num(rawPaid) > 0) {
+        const dateText = excelDateToTextV78(rawDate);
+        lastPaidDate = dateText || `2026-${String(mc.month).padStart(2, "0")}`;
+      }
+    }
+
+    if (!latestMonth) continue;
+
+    const positiveUnpaid = Math.max(0, latestUnpaid);
+    const unpaidMonths = monthlyAmount > 0 ? Math.ceil(positiveUnpaid / monthlyAmount) : 0;
+
+    rows.push({
+      sourceFile,
+      region,
+      account,
+      billingType: account,
+      vehicleNo,
+      name,
+      note,
+      billingStartMonth: "",
+      latestMonth,
+      historyCount: 0,
+      totalUnpaid: positiveUnpaid,
+      unpaidMonths,
+      paidEventMonths: 0,
+      paidTotalAmount: 0,
+      lastPaidMonth: lastPaidDate,
+      monthlyAmount,
+    });
+  }
+
+  return rows;
+}
+
+async function handleFilesV78(files: FileList | File[]) {
+  setStatus("파일 읽는 중...");
+
+  let allSummaries: SummaryRow[] = [];
+  let allMonthlies: MonthlyRow[] = [];
+
+  for (const file of Array.from(files)) {
+    if (file.name.toLowerCase().endsWith(".xlsx") || file.name.toLowerCase().endsWith(".xlsm")) {
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
+      allSummaries = allSummaries.concat(parseCurrent2026WorkbookV78(workbook, file.name));
+      continue;
+    }
+
+    const oldSummaryCount = summaryRows.length;
+    await handleFile(file);
+    // 기존 handleFile은 state를 직접 바꾸므로, 단독 업로드 호환용으로 둔다.
+    // 여러 파일 처리는 아래에서 ZIP/CSV만 단순 생략하지 않고 직접 재파싱하려면 별도 구현 필요.
+  }
+
+  if (allSummaries.length) {
+    setSummaryRows((prev) => {
+      const map = new Map<string, SummaryRow>();
+      for (const row of prev) map.set(normalizeVehicle(row.vehicleNo) + "|" + row.name + "|" + (row.billingType || row.account || ""), row);
+      for (const row of allSummaries) {
+        const key = normalizeVehicle(row.vehicleNo) + "|" + row.name + "|" + (row.billingType || row.account || "");
+        const old = map.get(key);
+        map.set(key, { ...(old || {}), ...row, billingStartMonth: old?.billingStartMonth || row.billingStartMonth, historyCount: old?.historyCount || row.historyCount });
+      }
+      return Array.from(map.values());
+    });
+    setStatus(`2026 미수금 현재값 추출: ${allSummaries.length.toLocaleString("ko-KR")}명. 추출자료 저장을 누르세요.`);
+  }
+}
+
 export default function PaymentHistory() {
   const [summaryRows, setSummaryRows] = useState<SummaryRow[]>([]);
   const [monthlyRows, setMonthlyRows] = useState<MonthlyRow[]>([]);
@@ -274,7 +444,7 @@ export default function PaymentHistory() {
     <div className="p-6 space-y-5">
       <div>
         <h1 className="text-2xl font-bold">납부이력 추적</h1>
-        <div className="text-xs text-emerald-600 font-semibold mt-1">v77 2026 요약값 매핑 화면</div>
+        <div className="text-xs text-emerald-600 font-semibold mt-1">v78 2026 미수금 현재값 반영 화면</div>
         <p className="text-sm text-slate-500 mt-1">
           요약 CSV의 최근월말잔액/잔액있는월수를 미수금/미납발생개월수로 저장합니다.
         </p>
@@ -288,11 +458,8 @@ export default function PaymentHistory() {
             <input
               type="file"
               className="hidden"
-              accept=".zip,.csv"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file) handleFile(file);
-              }}
+              accept=".zip,.csv,.xlsx,.xlsm" multiple
+              onChange={(event) => { const files = event.target.files; if (files && files.length) handleFilesV78(files); }}
             />
           </label>
           <button
