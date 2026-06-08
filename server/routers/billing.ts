@@ -3203,3 +3203,180 @@ function __normalizeBillingPreviewV32(result: any): any {
 
 
 
+
+
+
+/* PAYMENT_HISTORY_SUMMARY_V82_HELPERS */
+const PAYMENT_HISTORY_SUMMARY_TABLE_SQL_V82 = `
+CREATE TABLE IF NOT EXISTS payment_history_summary (
+  id SERIAL PRIMARY KEY,
+  vehicle_no TEXT NOT NULL,
+  name TEXT NOT NULL,
+  region TEXT,
+  billing_item TEXT NOT NULL,
+  billing_start_month TEXT,
+  billing_month_count INTEGER DEFAULT 0,
+  unpaid_month_count INTEGER DEFAULT 0,
+  current_ar_amount INTEGER DEFAULT 0,
+  recent_payment_month TEXT,
+  source_file TEXT,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_payment_history_summary_key
+ON payment_history_summary (
+  COALESCE(vehicle_no, ''),
+  COALESCE(name, ''),
+  COALESCE(billing_item, '')
+);
+`;
+
+function normalizeAmountV82(value: any): number {
+  if (value === null || value === undefined) return 0;
+  if (typeof value === "number") return Math.trunc(value);
+  const s = String(value).replace(/원/g, "").replace(/,/g, "").trim();
+  const n = Number(s);
+  return Number.isFinite(n) ? Math.trunc(n) : 0;
+}
+
+function normalizeIntV82(value: any): number {
+  if (value === null || value === undefined || value === "") return 0;
+  const n = Number(String(value).replace(/,/g, "").trim());
+  return Number.isFinite(n) ? Math.trunc(n) : 0;
+}
+
+function firstValueV82(row: any, keys: string[], fallback: any = "") {
+  for (const key of keys) {
+    if (row && row[key] !== undefined && row[key] !== null && row[key] !== "") return row[key];
+  }
+  return fallback;
+}
+
+function assertNonEmptySqlV82(sqlText: any, label = "SQL") {
+  const s = typeof sqlText === "string" ? sqlText : String(sqlText || "");
+  if (!s.trim()) throw new Error(label + " is empty");
+  return sqlText;
+}
+
+async function runSqlV82(dbOrPool: any, sqlText: string, params?: any[]) {
+  assertNonEmptySqlV82(sqlText, "runSqlV82");
+  if (dbOrPool?.query) return dbOrPool.query(sqlText, params || []);
+  if (dbOrPool?.execute) return dbOrPool.execute(sqlText, params || []);
+  if (dbOrPool?.unsafe) return dbOrPool.unsafe(sqlText, params || []);
+  throw new Error("No supported DB query method found for v82 patch");
+}
+
+async function ensurePaymentHistorySummaryTableV82(dbOrPool: any) {
+  const parts = PAYMENT_HISTORY_SUMMARY_TABLE_SQL_V82.split(";").map(s => s.trim()).filter(Boolean);
+  for (const part of parts) await runSqlV82(dbOrPool, part);
+}
+
+async function upsertPaymentHistorySummaryRowsV82(dbOrPool: any, rows: any[], sourceFile = "[사용]2026미수금.xlsm") {
+  await ensurePaymentHistorySummaryTableV82(dbOrPool);
+  if (!Array.isArray(rows) || rows.length === 0) return { saved: 0 };
+
+  let saved = 0;
+  const sql = `
+    INSERT INTO payment_history_summary (
+      vehicle_no, name, region, billing_item,
+      billing_start_month, billing_month_count,
+      unpaid_month_count, current_ar_amount,
+      recent_payment_month, source_file, updated_at
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+    ON CONFLICT (
+      COALESCE(vehicle_no, ''),
+      COALESCE(name, ''),
+      COALESCE(billing_item, '')
+    )
+    DO UPDATE SET
+      region = EXCLUDED.region,
+      billing_start_month = EXCLUDED.billing_start_month,
+      billing_month_count = EXCLUDED.billing_month_count,
+      unpaid_month_count = EXCLUDED.unpaid_month_count,
+      current_ar_amount = EXCLUDED.current_ar_amount,
+      recent_payment_month = EXCLUDED.recent_payment_month,
+      source_file = EXCLUDED.source_file,
+      updated_at = NOW()
+  `;
+
+  for (const row of rows) {
+    const vehicleNo = String(firstValueV82(row, ["vehicle_no", "vehicleNo", "carNo", "차량번호"])).trim();
+    const name = String(firstValueV82(row, ["name", "memberName", "성명", "이름"])).trim();
+    const billingItem = String(firstValueV82(row, ["billing_item", "billingItem", "부과항목"], "협회비")).trim();
+    if (!vehicleNo && !name) continue;
+
+    const params = [
+      vehicleNo,
+      name,
+      String(firstValueV82(row, ["region", "지역"])).trim(),
+      billingItem,
+      String(firstValueV82(row, ["billing_start_month", "billingStartMonth", "부과시작월"])).trim(),
+      normalizeIntV82(firstValueV82(row, ["billing_month_count", "billingMonthCount", "부과개월수"])),
+      normalizeIntV82(firstValueV82(row, ["unpaid_month_count", "unpaidMonthCount", "미납발생개월수", "미납개월수"])),
+      normalizeAmountV82(firstValueV82(row, ["current_ar_amount", "currentArAmount", "미수금", "미수금액"])),
+      String(firstValueV82(row, ["recent_payment_month", "recentPaymentMonth", "최근납부일", "최근납부월"])).trim(),
+      sourceFile
+    ];
+
+    await runSqlV82(dbOrPool, sql, params);
+    saved++;
+  }
+
+  return { saved };
+}
+
+async function selectPaymentHistorySummaryV82(dbOrPool: any, search = "") {
+  await ensurePaymentHistorySummaryTableV82(dbOrPool);
+  const q = String(search || "").trim();
+  const sql = q
+    ? `
+      SELECT
+        vehicle_no,
+        name,
+        region,
+        billing_item,
+        billing_start_month,
+        billing_start_month AS unpaid_start_month,
+        billing_month_count,
+        unpaid_month_count,
+        current_ar_amount,
+        recent_payment_month
+      FROM payment_history_summary
+      WHERE vehicle_no ILIKE $1 OR name ILIKE $1 OR region ILIKE $1 OR billing_item ILIKE $1
+      ORDER BY region NULLS LAST, billing_item NULLS LAST, vehicle_no NULLS LAST, name NULLS LAST
+      LIMIT 5000
+    `
+    : `
+      SELECT
+        vehicle_no,
+        name,
+        region,
+        billing_item,
+        billing_start_month,
+        billing_start_month AS unpaid_start_month,
+        billing_month_count,
+        unpaid_month_count,
+        current_ar_amount,
+        recent_payment_month
+      FROM payment_history_summary
+      ORDER BY region NULLS LAST, billing_item NULLS LAST, vehicle_no NULLS LAST, name NULLS LAST
+      LIMIT 5000
+    `;
+  const result = await runSqlV82(dbOrPool, sql, q ? ["%" + q + "%"] : []);
+  return Array.isArray(result) ? result : (result?.rows || []);
+}
+
+async function getPaymentHistorySummaryStatsV82(dbOrPool: any) {
+  await ensurePaymentHistorySummaryTableV82(dbOrPool);
+  const sql = `
+    SELECT
+      COUNT(*)::int AS total_count,
+      COUNT(*) FILTER (WHERE COALESCE(current_ar_amount,0) > 0)::int AS unpaid_people_count,
+      COALESCE(SUM(CASE WHEN current_ar_amount > 0 THEN current_ar_amount ELSE 0 END),0)::int AS total_ar_amount
+    FROM payment_history_summary
+  `;
+  const result = await runSqlV82(dbOrPool, sql);
+  return (result?.rows && result.rows[0]) || result?.[0] || { total_count: 0, unpaid_people_count: 0, total_ar_amount: 0 };
+}
+/* END PAYMENT_HISTORY_SUMMARY_V82_HELPERS */
+
