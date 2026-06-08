@@ -19,6 +19,40 @@ import { eq, like } from "drizzle-orm";
 import { billingCandidates } from "../../drizzle/schema";
 
 
+
+
+async function safePaymentHistoryQueryV78(pool: any, query: any, params?: any[]) {
+  const text = typeof query === 'string' ? query : query?.text;
+  if (!text || String(text).trim() === '') {
+    console.warn('[payment-history:v78] blocked empty SQL query');
+    return { rows: [], rowCount: 0 };
+  }
+  return params ? pool.query(query, params) : pool.query(query);
+}
+async function ensurePaymentHistoryRowsTableV78(pool: any) {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS payment_history_rows (
+      id SERIAL PRIMARY KEY,
+      vehicle_no TEXT,
+      vehicle_no_norm TEXT NOT NULL,
+      name TEXT NOT NULL,
+      region TEXT,
+      billing_type TEXT NOT NULL,
+      billing_month TEXT NOT NULL,
+      expected_amount INTEGER DEFAULT 0,
+      balance_decrease_amount INTEGER DEFAULT 0,
+      current_balance_amount INTEGER DEFAULT 0,
+      memo TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_history_row ON payment_history_rows(vehicle_no_norm, name, billing_type, billing_month)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_history_vehicle ON payment_history_rows(vehicle_no_norm)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_history_name ON payment_history_rows(name)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_history_month ON payment_history_rows(billing_month)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payment_history_type ON payment_history_rows(billing_type)`);
+}
 // v77 hard guard: PostgreSQL throws "Received unexpected emptyQuery message from backend"
 // when pool.query receives an empty SQL string. This wrapper makes empty SQL a safe no-op
 // so payment-history screens do not crash while initial/empty states are loading.
