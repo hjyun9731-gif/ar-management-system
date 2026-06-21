@@ -333,7 +333,7 @@ export default function MemberImport() {
     : null;
 
   return (
-    <div className="p-6 space-y-5 max-w-7xl">
+    <div className="ar-page space-y-5 max-w-7xl">
       {/* Header */}
       <div>
         <h1 className="text-xl font-bold text-slate-900">회원관리 자료 불러오기</h1>
@@ -683,7 +683,6 @@ export default function MemberImport() {
     </div>
   );
 }
-
 
 
 

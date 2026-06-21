@@ -77,7 +77,7 @@ export default function ClosureEvents() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 p-5 space-y-5">
+    <div className="ar-page space-y-5 max-w-7xl">
       {/* 헤더 */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>

@@ -1,19 +1,25 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
-  LogOut,
-  Settings,
-  LayoutDashboard,
-  Users,
-  CalendarCheck,
-  Building2,
-  Receipt,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Activity,
+  Building2,
+  CalendarCheck,
   ChevronRight,
+  FolderInput,
+  History,
+  LayoutDashboard,
+  LogOut,
+  Receipt,
+  Settings,
   UserCircle,
-  FolderInput, History,
+  Users,
 } from "lucide-react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/_core/hooks/useAuth";
@@ -25,18 +31,17 @@ interface DashboardLayoutProps {
 
 const NAV_ITEMS = [
   { label: "대시보드", href: "/", icon: LayoutDashboard },
-  { label: "다음 달 부과 대상", href: "/candidates", icon: Users },
-  { label: "이번 달 부과 예정", href: "/approval", icon: CalendarCheck },
-  { label: "폐업·양도·이관 현황", href: "/closures", icon: Building2 },
-  { label: "납부현황", href: "/billing-records", icon: Receipt },
+  { label: "미수금 명단", href: "/candidates", icon: Users },
+  { label: "수납 관리", href: "/approval", icon: CalendarCheck },
+  { label: "폐업 현황", href: "/closures", icon: Building2 },
+  { label: "부과 현황", href: "/billing-records", icon: Receipt },
   { label: "연동 로그", href: "/sync-logs", icon: Activity },
-  { label: "회원관리 자료 불러오기", href: "/import", icon: FolderInput },
-  { label: "납부이력 추적", href: "/payment-history", icon: History },
+  { label: "엑셀 업로드", href: "/import", icon: FolderInput },
+  { label: "수납 이력", href: "/payment-history", icon: History },
 ];
 
 function getPageTitle(location: string): string {
-  const item = NAV_ITEMS.find((n) => n.href === location);
-  return item?.label ?? "관리 시스템";
+  return NAV_ITEMS.find((item) => item.href === location)?.label ?? "미수금 관리";
 }
 
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
@@ -46,8 +51,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [password, setPassword] = useState("");
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  const handleSimpleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSimpleLogin = async (event: React.FormEvent) => {
+    event.preventDefault();
     setIsLoggingIn(true);
     try {
       const response = await fetch("/api/auth/simple-login", {
@@ -57,15 +62,15 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       });
       if (!response.ok) {
         const error = await response.json();
-        toast.error(error.error || "로그인 실패");
+        toast.error(error.error || "로그인에 실패했습니다.");
         return;
       }
-      toast.success("로그인 성공");
+      toast.success("로그인했습니다.");
       setPassword("");
       setShowSimpleLogin(false);
       window.location.reload();
     } catch {
-      toast.error("로그인 중 오류 발생");
+      toast.error("로그인 중 오류가 발생했습니다.");
     } finally {
       setIsLoggingIn(false);
     }
@@ -74,164 +79,112 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const handleLogout = async () => {
     try {
       await logout();
-      toast.success("로그아웃 되었습니다");
+      toast.success("로그아웃했습니다.");
       navigate("/");
     } catch {
-      toast.error("로그아웃 중 오류 발생");
+      toast.error("로그아웃 중 오류가 발생했습니다.");
     }
   };
 
-  const pageTitle = getPageTitle(location);
+  const accountMenu = user && (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button className="ar-account-button" aria-label="사용자 메뉴">
+          <UserCircle className="h-5 w-5" />
+          <span className="hidden lg:inline">{user.name || "관리자"}</span>
+          <Settings className="h-3.5 w-3.5 text-slate-400" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-44">
+        <DropdownMenuItem onClick={handleLogout} className="cursor-pointer text-red-600">
+          <LogOut className="mr-2 h-4 w-4" /> 로그아웃
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 
   return (
-    <div className="flex h-screen bg-slate-50">
-      {/* Sidebar */}
-      <aside className="hidden md:flex md:w-64 md:flex-col bg-white border-r border-slate-200 shadow-sm">
-        {/* Brand */}
-        <div className="flex flex-col items-start justify-center h-[72px] px-5 border-b border-slate-100">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center flex-shrink-0">
-              <Receipt className="w-4 h-4 text-white" />
-            </div>
-            <div>
-              <p className="text-[11px] font-medium text-slate-400 leading-none mb-0.5">강원도 개인소형화물협회</p>
-              <h1 className="text-sm font-bold text-slate-800 leading-none">부과 관리 시스템</h1>
-            </div>
+    <div className="ar-shell">
+      <aside className="ar-sidebar">
+        <div className="ar-brand">
+          <div className="ar-brand-mark"><Receipt className="h-4 w-4" /></div>
+          <div className="min-w-0">
+            <p className="ar-brand-caption">운영 관리 시스템</p>
+            <h1 className="ar-brand-title">미수금·수납 관리</h1>
           </div>
         </div>
 
-        {/* Nav */}
-        <nav className="flex-1 overflow-y-auto py-3 px-3 space-y-0.5">
+        <nav className="ar-nav" aria-label="주 메뉴">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const isActive = location === item.href;
             return (
-              <a
-                key={item.href}
-                href={item.href}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium group ${
-                  isActive
-                    ? "bg-indigo-50 text-indigo-700"
-                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                }`}
-              >
-                <div
-                  className={`w-[3px] h-5 rounded-full mr-0.5 flex-shrink-0 transition-all ${
-                    isActive ? "bg-indigo-600" : "bg-transparent"
-                  }`}
-                />
-                <Icon
-                  className={`w-4 h-4 flex-shrink-0 transition-colors ${
-                    isActive ? "text-indigo-600" : "text-slate-400 group-hover:text-slate-600"
-                  }`}
-                />
-                <span className="flex-1 leading-none">{item.label}</span>
-                {isActive && <ChevronRight className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />}
+              <a key={item.href} href={item.href} className={`ar-nav-item ${isActive ? "is-active" : ""}`}>
+                <Icon className="h-4 w-4" />
+                <span>{item.label}</span>
+                {isActive && <ChevronRight className="ml-auto h-3.5 w-3.5" />}
               </a>
             );
           })}
         </nav>
 
-        {/* User Profile */}
-        <div className="border-t border-slate-100 p-3">
-          <div className="flex items-center gap-2.5 px-2 py-2 rounded-lg">
-            <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center flex-shrink-0">
-              <UserCircle className="w-5 h-5 text-slate-400" />
+        <div className="ar-sidebar-footer">
+          <div className="ar-user-summary">
+            <UserCircle className="h-7 w-7 text-slate-400" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-semibold text-slate-700">{user?.name || "관리자"}</p>
+              <p className="truncate text-[11px] text-slate-400">{user?.email || "로그인이 필요합니다"}</p>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-slate-800 truncate">{user?.name || "Administrator"}</p>
-              <p className="text-xs text-slate-400 truncate">{user?.email || "admin@internal"}</p>
-            </div>
-            {user && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button className="p-1.5 hover:bg-slate-100 rounded-lg transition-colors">
-                    <Settings className="w-4 h-4 text-slate-400" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-48">
-                  <DropdownMenuItem onClick={handleLogout} className="text-red-600 cursor-pointer">
-                    <LogOut className="w-4 h-4 mr-2" />
-                    로그아웃
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
           </div>
         </div>
       </aside>
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Top Bar */}
-        <header className="bg-white border-b border-slate-200 px-6 h-[72px] flex items-center justify-between flex-shrink-0">
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-400">강원도 개인소형화물협회</span>
-            <ChevronRight className="w-3 h-3 text-slate-300" />
-            <span className="text-sm font-semibold text-slate-800">{pageTitle}</span>
+      <div className="ar-main">
+        <header className="ar-topbar">
+          <div>
+            <p className="text-[11px] font-medium text-slate-400">미수금 관리</p>
+            <h2 className="text-sm font-semibold text-slate-800">{getPageTitle(location)}</h2>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             {!user && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowSimpleLogin(!showSimpleLogin)}
-                className="text-xs"
-              >
-                로그인
+              <Button variant="outline" size="sm" onClick={() => setShowSimpleLogin((value) => !value)}>
+                관리자 로그인
               </Button>
             )}
-            {user && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-50 transition-colors">
-                    <div className="w-7 h-7 rounded-full bg-indigo-100 flex items-center justify-center">
-                      <UserCircle className="w-4 h-4 text-indigo-600" />
-                    </div>
-                    <div className="text-right hidden sm:block">
-                      <p className="text-xs font-medium text-slate-900 leading-tight">{user.name || "Administrator"}</p>
-                      <p className="text-[11px] text-slate-400 leading-tight">{user.email || "admin@internal"}</p>
-                    </div>
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-48">
-                  <DropdownMenuItem onClick={handleLogout} className="text-red-600 cursor-pointer">
-                    <LogOut className="w-4 h-4 mr-2" />
-                    로그아웃
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
+            {accountMenu}
           </div>
         </header>
 
-        {/* Simple Login Form */}
         {showSimpleLogin && (
-          <div className="bg-amber-50 border-b border-amber-200 px-6 py-3">
-            <form onSubmit={handleSimpleLogin} className="flex items-center gap-3 max-w-sm">
+          <div className="ar-login-bar">
+            <form onSubmit={handleSimpleLogin} className="flex w-full max-w-sm items-center gap-2">
               <Input
                 type="password"
                 placeholder="관리자 비밀번호"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="h-8 text-sm"
+                onChange={(event) => setPassword(event.target.value)}
+                className="h-8 bg-white text-sm"
               />
-              <Button type="submit" size="sm" disabled={isLoggingIn} className="h-8 text-xs whitespace-nowrap">
-                {isLoggingIn ? "로그인 중..." : "로그인"}
+              <Button type="submit" size="sm" disabled={isLoggingIn} className="h-8 whitespace-nowrap">
+                {isLoggingIn ? "확인 중" : "로그인"}
               </Button>
             </form>
           </div>
         )}
 
-        {/* Content */}
-        <main className="flex-1 overflow-auto">{children}</main>
+        <nav className="ar-mobile-nav" aria-label="모바일 메뉴">
+          {NAV_ITEMS.map((item) => {
+            const Icon = item.icon;
+            return (
+              <a key={item.href} href={item.href} className={location === item.href ? "is-active" : ""}>
+                <Icon className="h-3.5 w-3.5" /> {item.label}
+              </a>
+            );
+          })}
+        </nav>
+
+        <main className="ar-content">{children}</main>
       </div>
     </div>
   );
 }
-
-
-
-
-
-

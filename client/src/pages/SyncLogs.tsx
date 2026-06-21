@@ -54,7 +54,7 @@ export default function SyncLogs() {
   const warnCount = logs.filter((l: any) => l.status === "WARNING").length;
 
   return (
-    <div className="p-6 space-y-5 max-w-7xl">
+    <div className="ar-page space-y-5 max-w-7xl">
       {/* Header */}
       <div>
         <h1 className="text-xl font-bold text-slate-900">연동 로그</h1>
