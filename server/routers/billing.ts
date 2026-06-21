@@ -3291,6 +3291,471 @@ export const billingRouter = router({
       }
       return rows;
     }),
+
+  /* --- 수납 처리 v84 --- */
+  listPayments: publicProcedure
+    .input(z.object({
+      vehicleNo: z.string().optional(),
+      name: z.string().optional(),
+      search: z.string().optional(),
+      paymentType: z.string().optional(),
+      from: z.string().optional(),
+      to: z.string().optional(),
+      includeCAncelled: z.boolean().optional(),
+    }))
+    .query(async () => {
+      const pool = getPaymentHistoryPoolV79();
+      await ensurePaymentsTableV84(pool);
+      const result = await pool.query(`
+        SELECT id, candidate_id, vehicle_no, name, region,
+               payment_type, account_type, amount, target_month,
+               payment_date, payment_method, memo,
+               is_cancelled, cancelled_at, cancelled_memo,
+               created_at
+        FROM payments
+        ORDER BY payment_date DESC, created_at DESC
+        LIMIT 3000
+      `);
+      return result.rows || [];
+    }),
+
+  createPayment: publicProcedure
+    .input(z.object({
+      candidateId: z.number().optional(),
+      vehicleNo: z.string(),
+      name: z.string(),
+      region: z.string().optional(),
+      paymentType: z.enum(['협회비', '관리비', '자격증명발급비', '협회가입비', '기타']),
+      amount: z.number(),
+      targetMonth: z.string().optional(),
+      paymentDate: z.string(),
+      paymentMethod: z.string().optional(),
+      memo: z.string().optional(),
+      sourceBankTxId: z.number().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const pool = getPaymentHistoryPoolV79();
+      await ensurePaymentsTableV84(pool);
+
+      // 회계구분 결정
+      const accountType =
+        input.paymentType === '협회비' || input.paymentType === '관리비' ? '미수금차감' :
+        input.paymentType === '자격증명발급비' ? '잡수입' :
+        input.paymentType === '협회가입비' ? '가수금' : '기타수입';
+
+      const result = await pool.query(`
+        INSERT INTO payments (
+          candidate_id, vehicle_no, name, region,
+          payment_type, account_type, amount,
+          target_month, payment_date, payment_method,
+          memo, source_bank_tx_id
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        RETURNING id
+      `, [
+        input.candidateId || null,
+        input.vehicleNo, input.name, input.region || null,
+        input.paymentType, accountType, input.amount,
+        input.targetMonth || null, input.paymentDate,
+        input.paymentMethod || '직접수납',
+        input.memo || null, input.sourceBankTxId || null,
+      ]);
+
+      const paymentId = result.rows[0]?.id;
+
+      // 협회비/관리비인 경우 payment_history_summary_rows 미수금 차감
+      if (accountType === '미수금차감') {
+        try {
+          await pool.query(`
+            UPDATE payment_history_summary_rows
+            SET current_balance_amount = GREATEST(0, COALESCE(current_balance_amount, 0) - $1),
+                updated_at = NOW()
+            WHERE vehicle_no_norm = $2
+              AND (LOWER(TRIM(account)) = LOWER($3) OR LOWER(TRIM(billing_type)) = LOWER($3))
+          `, [input.amount, input.vehicleNo, input.paymentType]);
+        } catch {}
+        // payment_history_summary 테이블도 시도
+        try {
+          await pool.query(`
+            UPDATE payment_history_summary
+            SET current_ar_amount = GREATEST(0, COALESCE(current_ar_amount, 0) - $1),
+                updated_at = NOW()
+            WHERE vehicle_no = $2
+              AND LOWER(TRIM(billing_item)) = LOWER($3)
+          `, [input.amount, input.vehicleNo, input.paymentType]);
+        } catch {}
+      }
+
+      // 통장 거래내역 매칭 처리
+      if (input.sourceBankTxId) {
+        try {
+          await pool.query(`
+            UPDATE bank_transactions
+            SET match_status = '수납처리', matched_payment_id = $1, updated_at = NOW()
+            WHERE id = $2
+          `, [paymentId, input.sourceBankTxId]);
+        } catch {}
+      }
+
+      return { success: true, paymentId };
+    }),
+
+  cancelPayment: publicProcedure
+    .input(z.object({
+      paymentId: z.number(),
+      cancelMemo: z.string().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const pool = getPaymentHistoryPoolV79();
+      await ensurePaymentsTableV84(pool);
+
+      const existing = await pool.query(
+        'SELECT * FROM payments WHERE id = $1 AND is_cancelled = FALSE',
+        [input.paymentId]
+      );
+      if (!existing.rows[0]) throw new TRPCError({ code: 'NOT_FOUND', message: '수납내역을 찾을 수 없거나 이미 취소된 건입니다.' });
+
+      const p = existing.rows[0];
+      await pool.query(`
+        UPDATE payments SET is_cancelled = TRUE, cancelled_at = NOW(),
+        cancelled_memo = $1, updated_at = NOW() WHERE id = $2
+      `, [input.cancelMemo || null, input.paymentId]);
+
+      // 협회비/관리비면 미수금 복구
+      if (p.account_type === '미수금차감') {
+        try {
+          await pool.query(`
+            UPDATE payment_history_summary_rows
+            SET current_balance_amount = COALESCE(current_balance_amount, 0) + $1, updated_at = NOW()
+            WHERE vehicle_no_norm = $2
+              AND (LOWER(TRIM(account)) = LOWER($3) OR LOWER(TRIM(billing_type)) = LOWER($3))
+          `, [p.amount, p.vehicle_no, p.payment_type]);
+        } catch {}
+        try {
+          await pool.query(`
+            UPDATE payment_history_summary
+            SET current_ar_amount = COALESCE(current_ar_amount, 0) + $1, updated_at = NOW()
+            WHERE vehicle_no = $2 AND LOWER(TRIM(billing_item)) = LOWER($3)
+          `, [p.amount, p.vehicle_no, p.payment_type]);
+        } catch {}
+      }
+
+      return { success: true };
+    }),
+
+  resetPayments: publicProcedure
+    .mutation(async () => {
+      const pool = getPaymentHistoryPoolV79();
+      await ensurePaymentsTableV84(pool);
+      await pool.query('TRUNCATE TABLE payments');
+      return { success: true };
+    }),
+
+  /* --- 통장매칭 v84 --- */
+  listBankTransactions: publicProcedure
+    .input(z.object({
+      matchStatus: z.string().optional(),
+      search: z.string().optional(),
+    }))
+    .query(async ({ input }) => {
+      const pool = getPaymentHistoryPoolV79();
+      await ensureBankTransactionsTableV84(pool);
+      const where: string[] = [];
+      const params: any[] = [];
+      if (input.matchStatus && input.matchStatus !== 'all') {
+        params.push(input.matchStatus);
+        where.push(`match_status = $${params.length}`);
+      }
+      if (input.search) {
+        params.push('%' + input.search + '%');
+        where.push(`(depositor ILIKE $${params.length} OR transaction_note ILIKE $${params.length})`);
+      }
+      const whereClause = where.length ? 'WHERE ' + where.join(' AND ') : '';
+      const result = await pool.query(`
+        SELECT id, upload_batch, transaction_date, depositor, transaction_note,
+               amount, balance_after, match_status, matched_candidate_id,
+               matched_candidate_name, matched_payment_id, match_note,
+               raw_text, is_excluded, created_at
+        FROM bank_transactions ${whereClause}
+        ORDER BY transaction_date DESC, id DESC
+        LIMIT 2000
+      `, params);
+      return result.rows || [];
+    }),
+
+  importBankTransactions: publicProcedure
+    .input(z.object({
+      batch: z.string(),
+      rows: z.array(z.object({
+        transactionDate: z.string().optional(),
+        depositor: z.string().optional(),
+        transactionNote: z.string().optional(),
+        amount: z.number(),
+        balanceAfter: z.number().optional(),
+        rawText: z.string().optional(),
+      })).max(5000),
+    }))
+    .mutation(async ({ input }) => {
+      const pool = getPaymentHistoryPoolV79();
+      await ensureBankTransactionsTableV84(pool);
+      let inserted = 0;
+      for (const row of input.rows) {
+        await pool.query(`
+          INSERT INTO bank_transactions (
+            upload_batch, transaction_date, depositor, transaction_note,
+            amount, balance_after, raw_text
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7)
+        `, [
+          input.batch,
+          row.transactionDate || null, row.depositor || null,
+          row.transactionNote || null, row.amount,
+          row.balanceAfter || null, row.rawText || null,
+        ]);
+        inserted++;
+      }
+      return { inserted };
+    }),
+
+  autoMatchBankTransactions: publicProcedure
+    .mutation(async () => {
+      const pool = getPaymentHistoryPoolV79();
+      await ensureBankTransactionsTableV84(pool);
+
+      // 미매칭 건만 대상으로
+      const txResult = await pool.query(`
+        SELECT id, depositor, transaction_note, amount FROM bank_transactions
+        WHERE match_status = '미매칭' AND is_excluded = FALSE ORDER BY id
+      `);
+      const txRows = txResult.rows || [];
+
+      // 회원 목록
+      const candResult = await pool.query(`
+        SELECT id, vehicle_no, name, region FROM billing_candidates
+        WHERE status NOT IN ('제외') ORDER BY id
+      `);
+      const candidates = candResult.rows || [];
+
+      let matched = 0;
+      for (const tx of txRows) {
+        const depositor = String(tx.depositor || '').trim();
+        const note = String(tx.transaction_note || '').trim();
+        const searchText = (depositor + ' ' + note).toLowerCase();
+
+        // 이름 + 차량번호 4자리 매칭
+        let bestMatch: any = null;
+        for (const c of candidates) {
+          const vLast4 = String(c.vehicle_no || '').replace(/[^0-9]/g, '').slice(-4);
+          const nameMatch = searchText.includes(String(c.name || '').toLowerCase());
+          const vehicleMatch = vLast4.length === 4 && searchText.includes(vLast4);
+          if (nameMatch && vehicleMatch) { bestMatch = c; break; }
+          if (nameMatch && !bestMatch) bestMatch = { ...c, _nameOnly: true };
+        }
+
+        if (bestMatch && !bestMatch._nameOnly) {
+          await pool.query(`
+            UPDATE bank_transactions SET match_status = '자동매칭',
+            matched_candidate_id = $1, matched_candidate_name = $2, updated_at = NOW()
+            WHERE id = $3
+          `, [bestMatch.id, bestMatch.name, tx.id]);
+          matched++;
+        } else if (bestMatch && bestMatch._nameOnly) {
+          await pool.query(`
+            UPDATE bank_transactions SET match_status = '후보있음',
+            matched_candidate_id = $1, matched_candidate_name = $2, updated_at = NOW()
+            WHERE id = $3
+          `, [bestMatch.id, bestMatch.name, tx.id]);
+        }
+      }
+      return { matched, total: txRows.length };
+    }),
+
+  matchBankTransaction: publicProcedure
+    .input(z.object({
+      txId: z.number(),
+      candidateId: z.number(),
+      candidateName: z.string(),
+      matchNote: z.string().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const pool = getPaymentHistoryPoolV79();
+      await pool.query(`
+        UPDATE bank_transactions
+        SET match_status = '수동매칭', matched_candidate_id = $1,
+        matched_candidate_name = $2, match_note = $3, updated_at = NOW()
+        WHERE id = $4
+      `, [input.candidateId, input.candidateName, input.matchNote || null, input.txId]);
+      return { success: true };
+    }),
+
+  excludeBankTransaction: publicProcedure
+    .input(z.object({ txId: z.number(), reason: z.string().optional() }))
+    .mutation(async ({ input }) => {
+      const pool = getPaymentHistoryPoolV79();
+      await pool.query(`
+        UPDATE bank_transactions
+        SET is_excluded = TRUE, match_status = '제외', match_note = $1, updated_at = NOW()
+        WHERE id = $2
+      `, [input.reason || null, input.txId]);
+      return { success: true };
+    }),
+
+  resetBankTransactions: publicProcedure
+    .mutation(async () => {
+      const pool = getPaymentHistoryPoolV79();
+      await ensureBankTransactionsTableV84(pool);
+      await pool.query('TRUNCATE TABLE bank_transactions');
+      return { success: true };
+    }),
+
+  /* --- 예정자 v84 --- */
+  listProspectiveMembers: publicProcedure
+    .query(async () => {
+      const pool = getPaymentHistoryPoolV79();
+      await ensureProspectiveMembersTableV84(pool);
+      const result = await pool.query(`
+        SELECT id, name, vehicle_no, mobile, address, region,
+               member_type, is_joined, certificate_date,
+               billing_start_date, expected_billing_type,
+               expected_monthly_amount, memo, status, created_at
+        FROM prospective_members
+        ORDER BY created_at DESC
+        LIMIT 1000
+      `);
+      return result.rows || [];
+    }),
+
+  createProspectiveMember: publicProcedure
+    .input(z.object({
+      name: z.string(),
+      vehicleNo: z.string(),
+      mobile: z.string().optional(),
+      address: z.string().optional(),
+      region: z.string().optional(),
+      memberType: z.string().optional(),
+      isJoined: z.boolean().optional(),
+      certificateDate: z.string().optional(),
+      billingStartDate: z.string().optional(),
+      expectedBillingType: z.string().optional(),
+      expectedMonthlyAmount: z.number().optional(),
+      memo: z.string().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const pool = getPaymentHistoryPoolV79();
+      await ensureProspectiveMembersTableV84(pool);
+      const result = await pool.query(`
+        INSERT INTO prospective_members (
+          name, vehicle_no, mobile, address, region,
+          member_type, is_joined, certificate_date,
+          billing_start_date, expected_billing_type,
+          expected_monthly_amount, memo
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        RETURNING id
+      `, [
+        input.name, input.vehicleNo, input.mobile || null,
+        input.address || null, input.region || null,
+        input.memberType || '개인회원', input.isJoined || false,
+        input.certificateDate || null, input.billingStartDate || null,
+        input.expectedBillingType || null, input.expectedMonthlyAmount || 10000,
+        input.memo || null,
+      ]);
+      return { success: true, id: result.rows[0]?.id };
+    }),
+
+  deleteProspectiveMember: publicProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input }) => {
+      const pool = getPaymentHistoryPoolV79();
+      await pool.query('DELETE FROM prospective_members WHERE id = $1', [input.id]);
+      return { success: true };
+    }),
+
+  /* --- 폐업 직접 처리 v84 --- */
+  createClosureFromList: publicProcedure
+    .input(z.object({
+      candidateId: z.number().optional(),
+      vehicleNo: z.string(),
+      name: z.string(),
+      region: z.string().optional(),
+      closureType: z.enum(['폐업', '양도', '이관', '탈퇴']),
+      processDate: z.string(),
+      documentNo: z.string().optional(),
+      receiptNo: z.string().optional(),
+      arAmount: z.number().optional(),
+      memo: z.string().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const pool = getPaymentHistoryPoolV79();
+      await ensureClosureEventsExtraV84(pool);
+
+      const pDate = new Date(input.processDate);
+      const nextMonth = pDate.getMonth() + 2 > 12
+        ? `${pDate.getFullYear() + 1}-01`
+        : `${pDate.getFullYear()}-${String(pDate.getMonth() + 2).padStart(2, '0')}`;
+
+      // closure_events 테이블에 직접 INSERT (PostgreSQL)
+      await pool.query(`
+        INSERT INTO closure_events (
+          source_system_id, closure_type, management_no,
+          region, vehicle_no, name, process_date,
+          exclude_start_month, unpaid_amount_at_closure,
+          reflect_status, memo, document_no, receipt_no,
+          ar_amount_at_closure
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+        ON CONFLICT DO NOTHING
+      `, [
+        `MANUAL-${Date.now()}`, input.closureType,
+        input.vehicleNo, input.region || null,
+        input.vehicleNo, input.name,
+        input.processDate, nextMonth,
+        input.arAmount || 0, '확인필요',
+        input.memo || null,
+        input.documentNo || null, input.receiptNo || null,
+        input.arAmount || 0,
+      ]);
+
+      // billing_candidates 상태 변경
+      if (input.candidateId) {
+        try {
+          await pool.query(`
+            UPDATE billing_candidates SET status = '제외', memo = $1
+            WHERE id = $2
+          `, [`${input.closureType} 처리`, input.candidateId]);
+        } catch {}
+      }
+
+      return { success: true };
+    }),
+
+  updateClosureContact: publicProcedure
+    .input(z.object({
+      closureId: z.number(),
+      contactConfirmed: z.boolean().optional(),
+      contactDate: z.string().optional(),
+      contactMethod: z.string().optional(),
+      contactMemo: z.string().optional(),
+      notifyTarget: z.boolean().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const pool = getPaymentHistoryPoolV79();
+      await ensureClosureEventsExtraV84(pool);
+      await pool.query(`
+        UPDATE closure_events SET
+          contact_confirmed = COALESCE($1, contact_confirmed),
+          contact_date = COALESCE($2::date, contact_date),
+          contact_method = COALESCE($3, contact_method),
+          contact_memo = COALESCE($4, contact_memo),
+          notify_target = COALESCE($5, notify_target),
+          updated_at = NOW()
+        WHERE id = $6
+      `, [
+        input.contactConfirmed ?? null,
+        input.contactDate || null,
+        input.contactMethod || null,
+        input.contactMemo || null,
+        input.notifyTarget ?? null,
+        input.closureId,
+      ]);
+      return { success: true };
+    }),
 });
 
 
@@ -3487,4 +3952,116 @@ async function getPaymentHistorySummaryStatsV82(dbOrPool: any) {
   return (result?.rows && result.rows[0]) || result?.[0] || { total_count: 0, unpaid_people_count: 0, total_ar_amount: 0 };
 }
 /* END PAYMENT_HISTORY_SUMMARY_V82_HELPERS */
+
+/* ============================================================
+   PAYMENTS - 수납 처리 v84
+   ============================================================ */
+
+async function ensurePaymentsTableV84(pool: any) {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS payments (
+      id SERIAL PRIMARY KEY,
+      candidate_id INTEGER,
+      vehicle_no TEXT NOT NULL,
+      name TEXT NOT NULL,
+      region TEXT,
+      payment_type TEXT NOT NULL,
+      account_type TEXT NOT NULL,
+      amount INTEGER NOT NULL,
+      target_month TEXT,
+      payment_date DATE NOT NULL,
+      payment_method TEXT DEFAULT '직접수납',
+      memo TEXT,
+      is_cancelled BOOLEAN DEFAULT FALSE,
+      cancelled_at TIMESTAMPTZ,
+      cancelled_memo TEXT,
+      source_bank_tx_id INTEGER,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payments_candidate ON payments(candidate_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payments_vehicle ON payments(vehicle_no)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(payment_date)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_payments_cancelled ON payments(is_cancelled)`);
+}
+
+/* ============================================================
+   BANK TRANSACTIONS - 통장매칭 v84
+   ============================================================ */
+
+async function ensureBankTransactionsTableV84(pool: any) {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS bank_transactions (
+      id SERIAL PRIMARY KEY,
+      upload_batch TEXT,
+      transaction_date DATE,
+      depositor TEXT,
+      transaction_note TEXT,
+      amount INTEGER NOT NULL,
+      balance_after INTEGER,
+      match_status TEXT DEFAULT '미매칭',
+      matched_candidate_id INTEGER,
+      matched_candidate_name TEXT,
+      matched_payment_id INTEGER,
+      match_note TEXT,
+      raw_text TEXT,
+      is_excluded BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_bank_tx_status ON bank_transactions(match_status)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_bank_tx_depositor ON bank_transactions(depositor)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_bank_tx_date ON bank_transactions(transaction_date)`);
+}
+
+/* ============================================================
+   PROSPECTIVE MEMBERS - 신규 예정자 v84
+   ============================================================ */
+
+async function ensureProspectiveMembersTableV84(pool: any) {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS prospective_members (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      vehicle_no TEXT NOT NULL,
+      mobile TEXT,
+      address TEXT,
+      region TEXT,
+      member_type TEXT DEFAULT '개인회원',
+      is_joined BOOLEAN DEFAULT FALSE,
+      certificate_date DATE,
+      billing_start_date DATE,
+      expected_billing_type TEXT,
+      expected_monthly_amount INTEGER DEFAULT 10000,
+      memo TEXT,
+      status TEXT DEFAULT '예정',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+}
+
+/* ============================================================
+   CLOSURE EVENTS EXTRA - 폐업현황 연락추적 v84
+   ============================================================ */
+
+async function ensureClosureEventsExtraV84(pool: any) {
+  // closure_events 테이블에 새 컬럼 추가 (이미 있으면 무시)
+  const extras = [
+    `ALTER TABLE closure_events ADD COLUMN IF NOT EXISTS document_no TEXT`,
+    `ALTER TABLE closure_events ADD COLUMN IF NOT EXISTS receipt_no TEXT`,
+    `ALTER TABLE closure_events ADD COLUMN IF NOT EXISTS contact_confirmed BOOLEAN DEFAULT FALSE`,
+    `ALTER TABLE closure_events ADD COLUMN IF NOT EXISTS contact_date DATE`,
+    `ALTER TABLE closure_events ADD COLUMN IF NOT EXISTS contact_method TEXT`,
+    `ALTER TABLE closure_events ADD COLUMN IF NOT EXISTS contact_memo TEXT`,
+    `ALTER TABLE closure_events ADD COLUMN IF NOT EXISTS notify_target BOOLEAN DEFAULT FALSE`,
+    `ALTER TABLE closure_events ADD COLUMN IF NOT EXISTS billing_type TEXT`,
+    `ALTER TABLE closure_events ADD COLUMN IF NOT EXISTS ar_amount_at_closure INTEGER DEFAULT 0`,
+  ];
+  for (const sql of extras) {
+    try { await pool.query(sql); } catch {}
+  }
+}
 
