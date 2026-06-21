@@ -77,7 +77,7 @@ export default function ClosureEvents() {
   };
 
   return (
-    <div className="ar-page space-y-5 max-w-7xl">
+    <div className="ar-page ar-closures-page space-y-5 max-w-7xl">
       {/* 헤더 */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -90,7 +90,7 @@ export default function ClosureEvents() {
       </div>
 
       {/* 요약 카드 */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="ar-summary-grid grid grid-cols-3 gap-3">
         <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
           <div className="text-xs text-slate-500 font-medium">전체 건수</div>
           <div className="text-2xl font-bold text-slate-900 mt-1">{(closures as any[]).length.toLocaleString()}건</div>
@@ -106,6 +106,13 @@ export default function ClosureEvents() {
       </div>
 
       {/* 미완료 알림 */}
+      <div className="ar-filter-chips">
+        {[{ value: "all", label: "전체" }, { value: "폐업", label: "폐업" }, { value: "양도", label: "양도" }, { value: "이관", label: "이관" }, { value: "탈퇴", label: "탈퇴" }].map((item) => (
+          <button key={item.value} className={closureType === item.value ? "is-active" : ""} onClick={() => setClosureType(item.value)}>{item.label}</button>
+        ))}
+        <span>처리 유형별 현황</span>
+      </div>
+
       {!isLoading && arrearsCount > 0 && (
         <div className="flex items-center gap-3 bg-orange-50 border border-orange-200 rounded-xl px-4 py-3">
           <AlertCircle className="w-4 h-4 text-orange-600 flex-shrink-0" />

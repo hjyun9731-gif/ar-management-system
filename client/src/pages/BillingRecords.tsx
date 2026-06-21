@@ -73,7 +73,7 @@ export default function BillingRecords() {
   const arrearsPeople = useMemo(() => rows.filter((row) => Number(row.arrearsAmount || 0) > 0).length, [rows]);
 
   return (
-    <div className="ar-page space-y-5 max-w-7xl">
+    <div className="ar-page ar-records-page space-y-5 max-w-7xl">
       {/* 헤더 */}
       <div>
         <h1 className="text-xl font-bold text-slate-900">납부현황</h1>

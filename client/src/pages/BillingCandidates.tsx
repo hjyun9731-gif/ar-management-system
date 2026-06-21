@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Download, Search, Filter, Users, FileSearch, AlertCircle } from "lucide-react";
+import { Download, FileSearch, Receipt, Search, Users } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { CandidateDetailModal } from "@/components/CandidateDetailModal";
 
@@ -15,33 +15,12 @@ const BILLING_TYPE_STYLE: Record<string, string> = {
   확인필요: "bg-amber-50 text-amber-700 border border-amber-200",
 };
 
-function money(value: unknown): string {
-  const n = Number(value || 0);
-  if (!Number.isFinite(n) || n === 0) return "-";
-  return n.toLocaleString("ko-KR") + "원";
-}
-
-function TableSkeleton() {
-  return (
-    <TableBody>
-      {[...Array(8)].map((_, i) => (
-        <TableRow key={i}>
-          {[...Array(9)].map((__, j) => (
-            <TableCell key={j}>
-              <div className="h-4 w-full max-w-[120px] animate-pulse rounded bg-slate-100" />
-            </TableCell>
-          ))}
-        </TableRow>
-      ))}
-    </TableBody>
-  );
-}
-
 export default function BillingCandidates() {
   const [region, setRegion] = useState("all");
   const [memberType, setMemberType] = useState("all");
   const [arrearsFilter, setArrearsFilter] = useState("all");
   const [searchText, setSearchText] = useState("");
+  const [sortBy, setSortBy] = useState("balance-desc");
   const [selectedCandidateId, setSelectedCandidateId] = useState<number | null>(null);
 
   const { data: candidates = [], isLoading } = trpc.billing.listCandidatesWithArrears.useQuery({
@@ -53,39 +32,27 @@ export default function BillingCandidates() {
   const filteredCandidates = useMemo(() => {
     let list = candidates as any[];
     if (searchText.trim()) {
-      const q = searchText.trim().toLowerCase();
-      list = list.filter((c) =>
-        String(c.vehicleNo || "").toLowerCase().includes(q) ||
-        String(c.name || "").toLowerCase().includes(q)
-      );
+      const query = searchText.trim().toLowerCase();
+      list = list.filter((candidate) => String(candidate.vehicleNo || "").toLowerCase().includes(query) || String(candidate.name || "").toLowerCase().includes(query));
     }
-    if (arrearsFilter === "있음") list = list.filter((c) => Number(c.currentArAmount || 0) > 0);
-    if (arrearsFilter === "없음") list = list.filter((c) => Number(c.currentArAmount || 0) <= 0);
-    return list;
-  }, [candidates, searchText, arrearsFilter]);
+    if (arrearsFilter === "있음") list = list.filter((candidate) => Number(candidate.currentArAmount || 0) > 0);
+    if (arrearsFilter === "없음") list = list.filter((candidate) => Number(candidate.currentArAmount || 0) <= 0);
+    return [...list].sort((a, b) => {
+      if (sortBy === "balance-asc") return Number(a.currentArAmount || 0) - Number(b.currentArAmount || 0);
+      if (sortBy === "name") return String(a.name || "").localeCompare(String(b.name || ""), "ko");
+      return Number(b.currentArAmount || 0) - Number(a.currentArAmount || 0);
+    });
+  }, [candidates, searchText, arrearsFilter, sortBy]);
 
-  const arrearsCount = useMemo(
-    () => (filteredCandidates as any[]).filter((c) => Number(c.currentArAmount || 0) > 0).length,
-    [filteredCandidates]
-  );
-
-  const totalArrears = useMemo(
-    () => (filteredCandidates as any[]).reduce((sum, c) => sum + Number(c.currentArAmount || 0), 0),
-    [filteredCandidates]
-  );
+  const arrearsCount = filteredCandidates.filter((candidate) => Number(candidate.currentArAmount || 0) > 0).length;
+  const prepaidCount = filteredCandidates.filter((candidate) => Number(candidate.currentArAmount || 0) < 0).length;
+  const totalArrears = filteredCandidates.reduce((sum, candidate) => sum + Math.max(Number(candidate.currentArAmount || 0), 0), 0);
 
   const handleDownload = () => {
-    const headers = ["차량번호", "성명", "지역", "구분", "부과항목", "부과시작월", "부과개월수", "미납발생개월수", "미수금", "최근납부일"];
-    const rows = (filteredCandidates as any[]).map((c) => [
-      c.vehicleNo || "", c.name || "", c.region || "", c.memberType || "",
-      c.billingType || "", c.billingStartMonth || "",
-      c.billingMonthCount || 0, c.unpaidMonthCount || 0,
-      c.currentArAmount || 0, c.recentPaymentMonth || "",
-    ]);
-    const csv = [headers, ...rows]
-      .map((row) => row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(","))
-      .join("\n");
-    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    const headers = ["차량번호", "성명", "지역", "구분", "부과항목", "부과시작월", "부과개월수", "미납발생개월수", "현재잔액", "최근납부월"];
+    const rows = filteredCandidates.map((candidate) => [candidate.vehicleNo || "", candidate.name || "", candidate.region || "", candidate.memberType || "", candidate.billingType || "", candidate.billingStartMonth || "", candidate.billingMonthCount || 0, candidate.unpaidMonthCount || 0, candidate.currentArAmount || 0, candidate.recentPaymentMonth || ""]);
+    const csv = [headers, ...rows].map((row) => row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
     link.download = `billing_candidates_${new Date().toISOString().split("T")[0]}.csv`;
@@ -93,188 +60,38 @@ export default function BillingCandidates() {
   };
 
   return (
-    <div className="ar-page space-y-5">
-      {/* 헤더 */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900">다음 달 부과 대상</h1>
-          <p className="text-sm text-slate-500 mt-0.5">폐업·양도·이관·탈퇴 제외 후 미수금 연동 조회</p>
-        </div>
-        <Button onClick={handleDownload} variant="outline" size="sm" className="gap-1.5 text-emerald-700 border-emerald-200 hover:bg-emerald-50">
-          <Download className="w-3.5 h-3.5" /> 엑셀 다운로드
-        </Button>
+    <div className="ar-page ar-candidates-page space-y-5">
+      <div className="ar-page-actions"><div /><Button onClick={handleDownload} variant="outline" size="sm"><Download className="h-4 w-4" />엑셀 다운로드</Button></div>
+
+      <div className="ar-summary-grid">
+        <div><p>전체 관리 대상</p><strong>{filteredCandidates.length.toLocaleString()}</strong><span>명</span></div>
+        <div><p>미수금 있음</p><strong className="text-red-600">{arrearsCount.toLocaleString()}</strong><span>명</span></div>
+        <div><p>현재 미수금</p><strong className="text-red-600">{totalArrears.toLocaleString()}</strong><span>원</span></div>
+        <div><p>선납·초과입금</p><strong className="text-blue-600">{prepaidCount.toLocaleString()}</strong><span>명</span></div>
       </div>
 
-      {/* 요약 카드 */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
-          <div className="text-xs text-slate-500 font-medium">부과 대상</div>
-          <div className="text-2xl font-bold text-slate-900 mt-1">{(filteredCandidates as any[]).length.toLocaleString()}명</div>
-        </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
-          <div className="text-xs text-slate-500 font-medium">미수금 있음</div>
-          <div className="text-2xl font-bold text-red-600 mt-1">{arrearsCount.toLocaleString()}명</div>
-        </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
-          <div className="text-xs text-slate-500 font-medium">미수금 합계</div>
-          <div className="text-2xl font-bold text-red-600 mt-1">{totalArrears > 0 ? totalArrears.toLocaleString() + "원" : "-"}</div>
-        </div>
+      <div className="ar-filter-chips">
+        {[{ value: "all", label: "전체" }, { value: "있음", label: "미수금 있음" }, { value: "없음", label: "미수금 없음" }].map((item) => <button key={item.value} className={arrearsFilter === item.value ? "is-active" : ""} onClick={() => setArrearsFilter(item.value)}>{item.label}</button>)}
+        <span>실제 DB 조회 결과 기준</span>
       </div>
 
-      {/* 검색/필터 */}
-      <Card className="bg-white border border-slate-200 shadow-sm">
-        <CardHeader className="pb-2 pt-4 px-5 border-b border-slate-100">
-          <CardTitle className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-            <Filter className="w-4 h-4 text-slate-400" /> 검색 및 필터
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="px-5 py-4">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-            <div>
-              <label className="text-xs font-medium text-slate-500 block mb-1.5">차량번호 / 성명</label>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <Input
-                  value={searchText}
-                  onChange={(e) => setSearchText(e.target.value)}
-                  placeholder="검색..."
-                  className="pl-9 h-9 text-sm"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-slate-500 block mb-1.5">지역</label>
-              <Select value={region} onValueChange={setRegion}>
-                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">전체</SelectItem>
-                  {["춘천시","강릉시","원주시","홍천군","횡성군","영월군","평창군","정선군","철원군","화천군","양구군","인제군","고성군","양양군"].map((r) => (
-                    <SelectItem key={r} value={r}>{r}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-slate-500 block mb-1.5">구분</label>
-              <Select value={memberType} onValueChange={setMemberType}>
-                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">전체</SelectItem>
-                  <SelectItem value="개인회원">개인회원</SelectItem>
-                  <SelectItem value="택배회원">택배회원</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-slate-500 block mb-1.5">미수금 여부</label>
-              <Select value={arrearsFilter} onValueChange={setArrearsFilter}>
-                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">전체</SelectItem>
-                  <SelectItem value="있음">있음</SelectItem>
-                  <SelectItem value="없음">없음</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </CardContent>
+      <Card className="ar-table-card">
+        <CardHeader><div className="ar-table-toolbar"><CardTitle><Users className="h-4 w-4" />미수금 회원 {filteredCandidates.length.toLocaleString()}명</CardTitle><div className="ar-toolbar-fields">
+          <div className="relative ar-search"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><Input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="이름 또는 차량번호 검색" className="pl-9" /></div>
+          <Select value={region} onValueChange={setRegion}><SelectTrigger><SelectValue placeholder="지역 전체" /></SelectTrigger><SelectContent><SelectItem value="all">지역 전체</SelectItem>{["춘천시", "강릉시", "원주시", "횡성군", "평창군", "정선군", "철원군", "화천군", "양구군", "인제군", "고성군", "양양군"].map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent></Select>
+          <Select value={memberType} onValueChange={setMemberType}><SelectTrigger><SelectValue placeholder="회원 구분" /></SelectTrigger><SelectContent><SelectItem value="all">회원 전체</SelectItem><SelectItem value="개인회원">개인회원</SelectItem><SelectItem value="법인회원">법인회원</SelectItem></SelectContent></Select>
+          <Select value={sortBy} onValueChange={setSortBy}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="balance-desc">현재잔액 높은순</SelectItem><SelectItem value="balance-asc">현재잔액 낮은순</SelectItem><SelectItem value="name">이름순</SelectItem></SelectContent></Select>
+        </div></div></CardHeader>
+        <CardContent className="p-0"><div className="overflow-x-auto"><Table><TableHeader><TableRow>
+          <TableHead>차량번호</TableHead><TableHead>성명</TableHead><TableHead>지역</TableHead><TableHead>부과항목</TableHead><TableHead>부과시작월</TableHead><TableHead className="text-right">부과개월</TableHead><TableHead className="text-right">미수개월</TableHead><TableHead className="text-right">현재잔액</TableHead><TableHead>최근납부월</TableHead><TableHead className="text-center">처리</TableHead>
+        </TableRow></TableHeader><TableBody>
+          {isLoading ? [...Array(7)].map((_, index) => <TableRow key={index}>{[...Array(10)].map((__, cell) => <TableCell key={cell}><div className="h-4 animate-pulse rounded bg-slate-100" /></TableCell>)}</TableRow>) : filteredCandidates.length === 0 ? <TableRow><TableCell colSpan={10} className="py-16 text-center"><FileSearch className="mx-auto mb-3 h-9 w-9 text-slate-200" /><p className="text-sm text-slate-400">조회 결과가 없습니다.</p></TableCell></TableRow> : filteredCandidates.map((candidate) => {
+            const balance = Number(candidate.currentArAmount || 0);
+            return <TableRow key={candidate.id}><TableCell className="font-mono font-semibold">{candidate.vehicleNo || "-"}</TableCell><TableCell><button className="font-medium hover:text-blue-600" onClick={() => setSelectedCandidateId(candidate.id)}>{candidate.name || "-"}</button></TableCell><TableCell>{candidate.region || "-"}</TableCell><TableCell><Badge className={BILLING_TYPE_STYLE[candidate.billingType] || BILLING_TYPE_STYLE.확인필요}>{candidate.billingType || "확인필요"}</Badge></TableCell><TableCell>{candidate.billingStartMonth || "-"}</TableCell><TableCell className="text-right">{candidate.billingMonthCount || "-"}</TableCell><TableCell className="text-right">{candidate.unpaidMonthCount || "-"}</TableCell><TableCell className={`text-right font-bold ${balance > 0 ? "text-red-600" : balance < 0 ? "text-blue-600" : "text-slate-400"}`}>{balance ? `${balance.toLocaleString()}원` : "-"}</TableCell><TableCell>{candidate.recentPaymentMonth || "-"}</TableCell><TableCell className="text-center"><Button size="sm" className="ar-payment-button" onClick={() => setSelectedCandidateId(candidate.id)}><Receipt className="h-3.5 w-3.5" />수납</Button></TableCell></TableRow>;
+          })}
+        </TableBody></Table></div></CardContent>
       </Card>
-
-      {/* 테이블 */}
-      <Card className="bg-white border border-slate-200 shadow-sm">
-        <CardHeader className="pb-3 pt-4 px-5 border-b border-slate-100">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-              <Users className="w-4 h-4 text-slate-400" /> 부과 대상자 목록
-            </CardTitle>
-            {!isLoading && (
-              <span className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-full px-2.5 py-1 font-medium">
-                {(filteredCandidates as any[]).length.toLocaleString()}명
-              </span>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-slate-50 hover:bg-slate-50">
-                  <TableHead className="text-xs font-semibold text-slate-500 pl-4">차량번호</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-500">성명</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-500">지역</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-500">부과항목</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-500">부과시작월</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-500 text-right">부과개월수</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-500 text-right">미납발생개월수</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-500 text-right">미수금</TableHead>
-                  <TableHead className="text-xs font-semibold text-slate-500">최근납부일</TableHead>
-                </TableRow>
-              </TableHeader>
-              {isLoading ? <TableSkeleton /> : (
-                <TableBody>
-                  {(filteredCandidates as any[]).length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={9} className="py-16 text-center">
-                        <FileSearch className="w-10 h-10 text-slate-200 mx-auto mb-3" />
-                        <p className="text-sm font-medium text-slate-400">부과 대상이 없습니다</p>
-                        <p className="text-xs text-slate-300 mt-1">필터 조건을 변경해 보세요</p>
-                      </TableCell>
-                    </TableRow>
-                  ) : (filteredCandidates as any[]).map((candidate: any) => {
-                    const hasArrears = Number(candidate.currentArAmount || 0) > 0;
-                    return (
-                      <TableRow key={candidate.id} className={`border-b border-slate-50 hover:bg-slate-50 ${hasArrears ? "bg-red-50/30" : ""}`}>
-                        <TableCell className="pl-4 py-2.5 font-mono font-semibold text-slate-900 text-sm">{candidate.vehicleNo || "-"}</TableCell>
-                        <TableCell className="py-2.5">
-                          <button
-                            type="button"
-                            onClick={() => setSelectedCandidateId(candidate.id)}
-                            className="font-medium text-slate-900 hover:text-indigo-700 hover:underline underline-offset-4"
-                          >
-                            {candidate.name}
-                          </button>
-                        </TableCell>
-                        <TableCell className="py-2.5 text-sm text-slate-600">{candidate.region || "-"}</TableCell>
-                        <TableCell className="py-2.5">
-                          <Badge className={`text-xs ${BILLING_TYPE_STYLE[candidate.billingType] || BILLING_TYPE_STYLE.확인필요}`}>
-                            {candidate.billingType}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="py-2.5 text-sm text-slate-600 font-mono">{candidate.billingStartMonth || "-"}</TableCell>
-                        <TableCell className="py-2.5 text-sm text-right text-slate-700">{candidate.billingMonthCount || "-"}</TableCell>
-                        <TableCell className="py-2.5 text-sm text-right">
-                          {Number(candidate.unpaidMonthCount || 0) > 0 ? (
-                            <span className="font-semibold text-red-600">{candidate.unpaidMonthCount}개월</span>
-                          ) : (
-                            <span className="text-slate-300">-</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="py-2.5 text-right">
-                          {hasArrears ? (
-                            <div className="flex items-center justify-end gap-1">
-                              <AlertCircle className="w-3 h-3 text-red-500 flex-shrink-0" />
-                              <span className="font-bold text-red-600 text-sm">{Number(candidate.currentArAmount).toLocaleString()}원</span>
-                            </div>
-                          ) : (
-                            <span className="text-slate-300 text-sm">-</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="py-2.5 text-sm text-slate-500 font-mono">{candidate.recentPaymentMonth || "-"}</TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              )}
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
-
-      <CandidateDetailModal
-        open={!!selectedCandidateId}
-        onOpenChange={(open) => !open && setSelectedCandidateId(null)}
-        candidateId={selectedCandidateId || 0}
-      />
+      <CandidateDetailModal open={!!selectedCandidateId} onOpenChange={(open) => !open && setSelectedCandidateId(null)} candidateId={selectedCandidateId || 0} />
     </div>
   );
 }

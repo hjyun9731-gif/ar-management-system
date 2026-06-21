@@ -94,7 +94,7 @@ export default function BillingApproval() {
   const tabData = getTabData();
 
   return (
-    <div className="ar-page space-y-4 max-w-7xl">
+    <div className="ar-page ar-regional-page space-y-4 max-w-7xl">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

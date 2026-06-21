@@ -54,7 +54,7 @@ export default function SyncLogs() {
   const warnCount = logs.filter((l: any) => l.status === "WARNING").length;
 
   return (
-    <div className="ar-page space-y-5 max-w-7xl">
+    <div className="ar-page ar-matching-page space-y-5 max-w-7xl">
       {/* Header */}
       <div>
         <h1 className="text-xl font-bold text-slate-900">연동 로그</h1>
@@ -63,7 +63,11 @@ export default function SyncLogs() {
 
       {/* Stats Row */}
       {!isLoading && logs.length > 0 && (
-        <div className="grid grid-cols-3 gap-3">
+        <div className="ar-bank-stats grid grid-cols-5 gap-3">
+          <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-center gap-3">
+            <Activity className="w-5 h-5 text-blue-600 flex-shrink-0" />
+            <div><div className="text-xl font-bold text-blue-800 tabular-nums">{logs.length}</div><div className="text-xs text-blue-600 font-medium">전체 입금</div></div>
+          </div>
           <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 flex items-center gap-3">
             <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
             <div>
@@ -84,6 +88,10 @@ export default function SyncLogs() {
               <div className="text-xl font-bold text-amber-800 tabular-nums">{warnCount}</div>
               <div className="text-xs text-amber-600 font-medium">경고</div>
             </div>
+          </div>
+          <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 flex items-center gap-3">
+            <Activity className="w-5 h-5 text-slate-500 flex-shrink-0" />
+            <div><div className="text-xl font-bold text-slate-700 tabular-nums">{failCount + warnCount}</div><div className="text-xs text-slate-500 font-medium">처리 필요</div></div>
           </div>
         </div>
       )}

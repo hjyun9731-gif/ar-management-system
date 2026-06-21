@@ -546,7 +546,7 @@ export default function PaymentHistory() {
     : [];
 
   return (
-    <div className="ar-page space-y-5">
+    <div className="ar-page ar-history-page space-y-5">
       <div>
         <h1 className="text-2xl font-bold">납부이력 추적</h1>
         <div className="text-xs text-emerald-600 font-semibold mt-1">v80 2026미수금 직접 추출 화면</div>
