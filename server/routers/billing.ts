@@ -2531,7 +2531,8 @@ export const billingRouter = router({
         // 부과대상 생성
         const result: any = await createBillingCandidate({
           sourceSystemId: input.sourceSystemId,
-          managementNo: input.managementNo,
+          managementNo: input.managementNo || undefined,
+          managementNoSource: input.managementNo ? 'member_system' : undefined,
           region: input.region,
           vehicleNo: input.vehicleNo,
           name: input.name,
@@ -2999,9 +3000,11 @@ export const billingRouter = router({
                 ? "확인필요"
                 : (scheduleTarget ? (item.status || "대기") : "기존부과중");
               const normalizedMobile = normalizeMobileForDb(row.mobile);
+              const inferredSource = row.sourceSystemId?.startsWith('MEMBER-') ? 'member_system' : 'import_csv';
               const result: any = await createBillingCandidate({
                 sourceSystemId: item.sourceSystemId,
-                managementNo: row.managementNo,
+                managementNo: row.managementNo || undefined,
+                managementNoSource: row.managementNo ? inferredSource : undefined,
                 region: row.region,
                 vehicleNo: row.vehicleNo,
                 name: row.name,
@@ -3723,6 +3726,63 @@ export const billingRouter = router({
       }
 
       return { success: true };
+    }),
+
+  // 자동생성 의심 관리번호 초기화
+  cleanupGeneratedManagementNumbers: publicProcedure
+    .mutation(async () => {
+      const pool = getPaymentHistoryPoolV79();
+
+      // billing_candidates 테이블에 management_no_source 컬럼이 없으면 추가
+      await pool.query(`
+        ALTER TABLE billing_candidates
+          ADD COLUMN IF NOT EXISTS management_no_source VARCHAR(50)
+      `).catch(() => null);
+
+      // 자동생성 의심 패턴: 신NN-숫자, 양NN-숫자, 폐-숫자, 이-숫자
+      // management_no_source가 'original'이 아닌 경우에만 초기화
+      const AUTO_PATTERN = /^(?:신\d{2}-\d+|양\d{2}-\d+|폐-\d+|이-\d+)$/;
+
+      const allResult = await pool.query(`
+        SELECT id, management_no, management_no_source
+        FROM billing_candidates
+        WHERE management_no IS NOT NULL AND management_no <> ''
+      `);
+      const rows = allResult.rows || [];
+
+      const toClean: number[] = [];
+      const kept: number[] = [];
+      const log: string[] = [];
+
+      for (const row of rows) {
+        const mn = String(row.management_no || '').trim();
+        const src = String(row.management_no_source || '');
+        if (src === 'original') {
+          kept.push(row.id);
+          continue;
+        }
+        if (AUTO_PATTERN.test(mn)) {
+          toClean.push(row.id);
+          log.push(`id=${row.id} management_no=${mn} source=${src || 'unknown'}`);
+        } else {
+          kept.push(row.id);
+        }
+      }
+
+      if (toClean.length > 0) {
+        await pool.query(
+          `UPDATE billing_candidates SET management_no = NULL, management_no_source = NULL WHERE id = ANY($1)`,
+          [toClean]
+        );
+      }
+
+      return {
+        ok: true,
+        cleared: toClean.length,
+        kept: kept.length,
+        message: `자동생성 의심 관리번호 ${toClean.length}건을 초기화했습니다.`,
+        details: log,
+      };
     }),
 
   updateClosureContact: publicProcedure

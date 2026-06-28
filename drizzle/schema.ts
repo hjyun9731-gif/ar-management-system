@@ -25,6 +25,7 @@ export const billingCandidates = mysqlTable("billing_candidates", {
   id: int("id").autoincrement().primaryKey(),
   sourceSystemId: varchar("source_system_id", { length: 50 }).notNull(),
   managementNo: varchar("management_no", { length: 50 }),
+  managementNoSource: varchar("management_no_source", { length: 50 }),
   region: varchar("region", { length: 50 }),
   vehicleNo: varchar("vehicle_no", { length: 50 }).notNull(),
   name: varchar("name", { length: 100 }).notNull(),

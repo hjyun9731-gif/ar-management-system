@@ -28,7 +28,7 @@ function getWarnings(c: any): string[] {
   if (c?.status === "확인필요") warnings.push("확인 필요 상태");
   if (String(c?.memo || "").includes("중복")) warnings.push("중복 의심");
   if (String(c?.memo || "").includes("누락")) warnings.push("자료 누락");
-  return [...new Set(warnings)];
+  return Array.from(new Set(warnings));
 }
 
 export function CandidateDetailModal({ open, onOpenChange, candidateId }: Props) {
@@ -37,6 +37,16 @@ export function CandidateDetailModal({ open, onOpenChange, candidateId }: Props)
   if (!open) return null;
   const c: any = candidate || {};
   const warnings = getWarnings(c);
+
+  const AUTO_MN_PATTERN = /^(?:신\d{2}-\d+|양\d{2}-\d+|폐-\d+|이-\d+)$/;
+  const managementNoDisplay = (() => {
+    const mn = c.managementNo;
+    if (!mn) return null;
+    const src = c.managementNoSource;
+    if (src === 'original' || src === 'manual') return mn;
+    if (AUTO_MN_PATTERN.test(mn)) return null;
+    return mn;
+  })();
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" onClick={() => onOpenChange(false)}>
@@ -57,7 +67,7 @@ export function CandidateDetailModal({ open, onOpenChange, candidateId }: Props)
 
             <Section title="기본 정보" icon={<User className="h-4 w-4 text-slate-400" />}>
               <Row label="성명" value={c.name} /><Row label="회원 구분" value={c.memberType} />
-              <Row label="지역" value={c.region} /><Row label="관리 번호" value={c.managementNo} />
+              <Row label="지역" value={c.region} /><Row label="관리 번호" value={managementNoDisplay} />
               <Row label="차량번호" value={c.vehicleNo} /><Row label="주민등록번호" value={c.rrn} />
             </Section>
 

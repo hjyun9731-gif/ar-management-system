@@ -5,7 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Download, FileSearch, Receipt, Search, Users, XCircle } from "lucide-react";
+import { Download, FileSearch, Receipt, Search, Trash2, TrendingDown, Users, XCircle } from "lucide-react";
+import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 import { CandidateDetailModal } from "@/components/CandidateDetailModal";
 import { PaymentModal } from "@/components/PaymentModal";
@@ -53,6 +54,8 @@ export default function BillingCandidates() {
       list = list.filter((candidate) => String(candidate.vehicleNo || "").toLowerCase().includes(query) || String(candidate.name || "").toLowerCase().includes(query));
     }
     if (arrearsFilter === "있음") list = list.filter((candidate) => Number(candidate.currentArAmount || 0) > 0);
+    if (arrearsFilter === "완납") list = list.filter((candidate) => Number(candidate.currentArAmount || 0) === 0);
+    if (arrearsFilter === "선납") list = list.filter((candidate) => Number(candidate.currentArAmount || 0) < 0);
     if (arrearsFilter === "없음") list = list.filter((candidate) => Number(candidate.currentArAmount || 0) <= 0);
     if (arrearsFilter === "12개월이상") list = list.filter((candidate) => Number(candidate.unpaidMonthCount || 0) >= 12);
     if (billingTypeFilter !== "all") list = list.filter((candidate) => candidate.billingType === billingTypeFilter);
@@ -65,8 +68,21 @@ export default function BillingCandidates() {
 
   const arrearsCount = filteredCandidates.filter((candidate) => Number(candidate.currentArAmount || 0) > 0).length;
   const prepaidCount = filteredCandidates.filter((candidate) => Number(candidate.currentArAmount || 0) < 0).length;
-  const totalArrears = filteredCandidates.reduce((sum, candidate) => sum + Math.max(Number(candidate.currentArAmount || 0), 0), 0);
+  const totalArrears = filteredCandidates.reduce((sum, candidate) => sum + Number(candidate.currentArAmount || 0), 0);
   const over12MonthCount = filteredCandidates.filter((candidate) => Number(candidate.unpaidMonthCount || 0) >= 12).length;
+
+  const cleanupMutation = trpc.billing.cleanupGeneratedManagementNumbers.useMutation({
+    onSuccess: (data) => {
+      toast.success(data.message);
+      refetch();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const handleCleanup = () => {
+    if (!confirm("원본에 없는 자동생성 관리번호만 비웁니다.\n실제 관리번호는 유지됩니다. 진행할까요?")) return;
+    cleanupMutation.mutate();
+  };
 
   const handleDownload = () => {
     const headers = ["차량번호", "성명", "지역", "구분", "부과항목", "부과시작월", "부과개월수", "미납발생개월수", "현재잔액", "최근납부월"];
@@ -81,12 +97,28 @@ export default function BillingCandidates() {
 
   return (
     <div className="ar-page ar-candidates-page space-y-5">
-      <div className="ar-page-actions"><div /><Button onClick={handleDownload} variant="outline" size="sm"><Download className="h-4 w-4" />엑셀 다운로드</Button></div>
+      <div className="ar-page-actions">
+        <div />
+        <div className="flex gap-2">
+          <Button onClick={handleCleanup} variant="outline" size="sm" disabled={cleanupMutation.isPending} className="text-amber-600 border-amber-200 hover:bg-amber-50">
+            <Trash2 className="h-4 w-4" />
+            {cleanupMutation.isPending ? "초기화 중..." : "자동생성 관리번호 초기화"}
+          </Button>
+          <Button onClick={handleDownload} variant="outline" size="sm"><Download className="h-4 w-4" />엑셀 다운로드</Button>
+        </div>
+      </div>
 
       <div className="ar-summary-grid">
         <div><p>전체 관리 대상</p><strong>{filteredCandidates.length.toLocaleString()}</strong><span>명</span></div>
         <div><p>미수금 있음</p><strong className="text-red-600">{arrearsCount.toLocaleString()}</strong><span>명</span></div>
-        <div><p>현재 미수금</p><strong className="text-red-600">{totalArrears.toLocaleString()}</strong><span>원</span></div>
+        <div><p>선납/초과</p><strong className="text-blue-600">{prepaidCount.toLocaleString()}</strong><span>명</span></div>
+        <div>
+          <p>현재잔액 합계</p>
+          <strong className={totalArrears > 0 ? "text-red-600" : totalArrears < 0 ? "text-blue-600" : ""}>
+            {totalArrears.toLocaleString()}
+          </strong>
+          <span>원</span>
+        </div>
         <div><p>12개월 이상 미납</p><strong className="text-orange-600">{over12MonthCount.toLocaleString()}</strong><span>명</span></div>
       </div>
 
@@ -94,7 +126,9 @@ export default function BillingCandidates() {
         {[
           { value: "all", label: "전체" },
           { value: "있음", label: "미수금 있음" },
-          { value: "없음", label: "미수금 없음" },
+          { value: "완납", label: "완납/0원" },
+          { value: "선납", label: "선납/초과" },
+          { value: "없음", label: "미수금 없음(완납+선납)" },
           { value: "12개월이상", label: "12개월 이상" },
         ].map((item) => (
           <button key={item.value} className={arrearsFilter === item.value ? "is-active" : ""} onClick={() => setArrearsFilter(item.value)}>
@@ -203,7 +237,8 @@ export default function BillingCandidates() {
                         {candidate.unpaidMonthCount || "-"}
                       </TableCell>
                       <TableCell className={`text-right font-bold ${balance > 0 ? "text-red-600" : balance < 0 ? "text-blue-600" : "text-slate-400"}`}>
-                        {balance ? `${balance.toLocaleString()}원` : "-"}
+                        {balance !== 0 ? `${balance.toLocaleString()}원` : "-"}
+                        {balance < 0 && <span className="ml-1 text-xs font-normal text-blue-400">(선납)</span>}
                       </TableCell>
                       <TableCell>{candidate.recentPaymentMonth || "-"}</TableCell>
                       <TableCell className="text-center">
